@@ -632,7 +632,7 @@ async def get_anime_subscribers(anime_id) -> list[int]:
         return [r[0] for r in await cur.fetchall()]
 
 
-# ═══════════════════════════════════════════════════════════════
+# ════════════════════════════════════��══════════════════════════
 #  STATS
 # ═══════════════════════════════════════════════════════════════
 async def log_action(user_id, action, data=""):
@@ -772,6 +772,12 @@ async def add_publish_channel(channel_id: str, title: str, added_by: int, join_l
             """,
             (channel_id, title, join_link, 1 if is_required else 0, added_by),
         )
+        await db.commit()
+
+
+async def remove_publish_channel(channel_id: str) -> None:
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("DELETE FROM publish_channels WHERE channel_id=?", (channel_id,))
         await db.commit()
 
 
