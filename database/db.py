@@ -152,10 +152,12 @@ async def init_db():
                 added_at      TEXT DEFAULT CURRENT_TIMESTAMP
             );
 
-            -- E'lon uchun ulangan kanallar
+            -- E'lon va homiy kanallar
             CREATE TABLE IF NOT EXISTS publish_channels (
                 channel_id    TEXT PRIMARY KEY,
                 title         TEXT,
+                join_link     TEXT DEFAULT '',
+                is_required   INTEGER DEFAULT 1,
                 added_by      INTEGER,
                 added_at      TEXT DEFAULT CURRENT_TIMESTAMP
             );
@@ -166,6 +168,15 @@ async def init_db():
             CREATE INDEX IF NOT EXISTS idx_sub_user    ON subscriptions(user_id);
             CREATE INDEX IF NOT EXISTS idx_rating      ON ratings(anime_id);
         """)
+
+        # Eski bazalarda yo'q ustunlarni qo'shamiz.
+        cur = await db.execute("PRAGMA table_info(publish_channels)")
+        columns = {row[1] for row in await cur.fetchall()}
+        if "join_link" not in columns:
+            await db.execute("ALTER TABLE publish_channels ADD COLUMN join_link TEXT DEFAULT ''")
+        if "is_required" not in columns:
+            await db.execute("ALTER TABLE publish_channels ADD COLUMN is_required INTEGER DEFAULT 1")
+
         await db.execute(
             "INSERT OR IGNORE INTO bot_settings(key, value) VALUES(?, ?)",
             ("storage_channel", ""),
@@ -292,35 +303,65 @@ async def search_local_anime(query: str) -> list:
     return [dict(r) for r in rows]
 
 
-async def get_all_anime(page=1, per_page=20) -> list:
+async def get_all_anime(page=1, per_page=20, include_inactive: bool = False) -> list:
     offset = (page - 1) * per_page
+    q = "SELECT * FROM anime_list"
+    if not include_inactive:
+        q += " WHERE is_active=1"
+    q += " ORDER BY added_at DESC LIMIT ? OFFSET ?"
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
-        cur = await db.execute(
-            "SELECT * FROM anime_list WHERE is_active=1 ORDER BY added_at DESC LIMIT ? OFFSET ?",
-            (per_page, offset)
-        )
+        cur = await db.execute(q, (per_page, offset))
         rows = await cur.fetchall()
     return [dict(r) for r in rows]
 
 
-async def get_total_anime_count() -> int:
-    """Jami aktiv animalar sonini qaytaradi"""
+async def get_total_anime_count(include_inactive: bool = False) -> int:
+    """Jami animalar sonini qaytaradi"""
+    q = "SELECT COUNT(*) FROM anime_list"
+    if not include_inactive:
+        q += " WHERE is_active=1"
     async with aiosqlite.connect(DB_PATH) as db:
-        cur = await db.execute("SELECT COUNT(*) FROM anime_list WHERE is_active=1")
+        cur = await db.execute(q)
         count = (await cur.fetchone())[0]
     return count
 
 
-async def update_anime_ep_count(anime_id: int):
+async def update_anime_fields(
+    anime_id: int,
+    *,
+    title_en: str | None = None,
+    genres: str | None = None,
+    status: str | None = None,
+    cover_image: str | None = None,
+):
+    fields = []
+    values = []
+    if title_en is not None:
+        fields.append("title_en=?")
+        values.append(title_en)
+    if genres is not None:
+        fields.append("genres=?")
+        values.append(genres)
+    if status is not None:
+        fields.append("status=?")
+        values.append(status)
+    if cover_image is not None:
+        fields.append("cover_image=?")
+        values.append(cover_image)
+
+    if not fields:
+        return
+
+    values.append(anime_id)
     async with aiosqlite.connect(DB_PATH) as db:
-        cur = await db.execute(
-            "SELECT COUNT(*) FROM episodes WHERE anime_id=?", (anime_id,)
-        )
-        count = (await cur.fetchone())[0]
-        await db.execute(
-            "UPDATE anime_list SET total_ep=? WHERE id=?", (count, anime_id)
-        )
+        await db.execute(f"UPDATE anime_list SET {', '.join(fields)} WHERE id=?", values)
+        await db.commit()
+
+
+async def set_anime_active(anime_id: int, is_active: int):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("UPDATE anime_list SET is_active=? WHERE id=?", (1 if is_active else 0, anime_id))
         await db.commit()
 
 
@@ -717,34 +758,83 @@ async def get_all_admin_ids() -> list[int]:
     return sorted(ids)
 
 
-async def add_publish_channel(channel_id: str, title: str, added_by: int) -> None:
+async def add_publish_channel(channel_id: str, title: str, added_by: int, join_link: str = "", is_required: int = 1) -> None:
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(
             """
-            INSERT INTO publish_channels(channel_id, title, added_by)
-            VALUES(?, ?, ?)
+            INSERT INTO publish_channels(channel_id, title, join_link, is_required, added_by)
+            VALUES(?, ?, ?, ?, ?)
             ON CONFLICT(channel_id) DO UPDATE SET
                 title=excluded.title,
+                join_link=excluded.join_link,
+                is_required=excluded.is_required,
                 added_by=excluded.added_by
             """,
-            (channel_id, title, added_by),
+            (channel_id, title, join_link, 1 if is_required else 0, added_by),
         )
         await db.commit()
 
 
-async def remove_publish_channel(channel_id: str) -> None:
+async def update_publish_channel(
+    channel_id: str,
+    *,
+    title: str | None = None,
+    join_link: str | None = None,
+    is_required: int | None = None,
+):
+    fields = []
+    values = []
+    if title is not None:
+        fields.append("title=?")
+        values.append(title)
+    if join_link is not None:
+        fields.append("join_link=?")
+        values.append(join_link)
+    if is_required is not None:
+        fields.append("is_required=?")
+        values.append(1 if is_required else 0)
+
+    if not fields:
+        return
+
+    values.append(channel_id)
     async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute("DELETE FROM publish_channels WHERE channel_id=?", (channel_id,))
+        await db.execute(f"UPDATE publish_channels SET {', '.join(fields)} WHERE channel_id=?", values)
         await db.commit()
+
+
+async def get_publish_channel(channel_id: str) -> dict | None:
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cur = await db.execute(
+            "SELECT channel_id, title, join_link, is_required, added_by, added_at FROM publish_channels WHERE channel_id=?",
+            (channel_id,),
+        )
+        row = await cur.fetchone()
+    return dict(row) if row else None
 
 
 async def get_publish_channels() -> list[dict]:
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         cur = await db.execute(
-            "SELECT channel_id, title, added_by, added_at FROM publish_channels ORDER BY added_at DESC"
+            "SELECT channel_id, title, join_link, is_required, added_by, added_at FROM publish_channels ORDER BY added_at DESC"
         )
         rows = await cur.fetchall()
     return [dict(r) for r in rows]
 
+
+async def get_required_channels() -> list[dict]:
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cur = await db.execute(
+            """
+            SELECT channel_id, title, join_link, is_required
+            FROM publish_channels
+            WHERE is_required=1
+            ORDER BY added_at DESC
+            """
+        )
+        rows = await cur.fetchall()
+    return [dict(r) for r in rows]
 

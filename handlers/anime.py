@@ -79,17 +79,11 @@ async def show_local_anime(target, anime_id: int, user_id: int):
     await log_action(user_id, "view_anime", str(anime_id))
 
     if isinstance(target, CallbackQuery):
-        msg = target.message
-        try:
-            if cover:
-                await msg.edit_caption(caption=text, parse_mode="HTML", reply_markup=kb)
-            else:
-                await msg.edit_text(text, parse_mode="HTML", reply_markup=kb)
-        except Exception:
-            if cover:
-                await msg.answer_photo(photo=cover, caption=text, parse_mode="HTML", reply_markup=kb)
-            else:
-                await msg.answer(text, parse_mode="HTML", reply_markup=kb)
+        # Har doim yangi xabar yuborish (edit qilmaslik)
+        if cover:
+            await target.message.answer_photo(photo=cover, caption=text, parse_mode="HTML", reply_markup=kb)
+        else:
+            await target.message.answer(text, parse_mode="HTML", reply_markup=kb)
     else:
         if cover:
             await target.answer_photo(photo=cover, caption=text, parse_mode="HTML", reply_markup=kb)

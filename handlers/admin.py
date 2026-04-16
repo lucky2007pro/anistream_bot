@@ -17,7 +17,9 @@ from database.db import (
     is_admin as db_is_admin, is_root_admin,
     add_delegated_admin, remove_delegated_admin, list_delegated_admins,
     add_publish_channel, remove_publish_channel, get_publish_channels,
-    get_setting, set_setting,
+    get_publish_channel, update_publish_channel,
+    get_all_anime, get_total_anime_count,
+    update_anime_fields, set_anime_active,
 )
 from utils.keyboards import admin_kb, cancel_kb, admin_ep_list_kb
 
@@ -43,6 +45,8 @@ class UploadEpState(StatesGroup):
 
 class ChannelState(StatesGroup):
     add_channel = State()
+    edit_channel = State()
+    toggle_required = State()
     remove_channel = State()
 
 
@@ -53,6 +57,13 @@ class AdminManageState(StatesGroup):
 
 class SubscribeSettingState(StatesGroup):
     waiting_channel = State()
+
+
+class EditAnimeState(StatesGroup):
+    title = State()
+    genres = State()
+    status = State()
+    cover = State()
 
 
 @router.message(F.text == "📊 Admin panel")
@@ -69,7 +80,10 @@ async def admin_panel(msg: Message):
         InlineKeyboardButton(text="➕ Anime qo'shish", callback_data="admin_add_anime"),
         InlineKeyboardButton(text="📤 Epizod yuklash", callback_data="admin_upload_ep"),
     )
-    b.row(InlineKeyboardButton(text="📡 Kanallar", callback_data="admin_channels"))
+    b.row(
+        InlineKeyboardButton(text="📋 Anime ro'yxati", callback_data="admin_anime_list"),
+        InlineKeyboardButton(text="📡 Kanallar", callback_data="admin_channels")
+    )
     b.row(InlineKeyboardButton(text="🔐 Majburiy obuna", callback_data="admin_subscribe_settings"))
     if is_root_admin(msg.from_user.id):
         b.row(InlineKeyboardButton(text="👥 Adminlar", callback_data="admin_manage_admins"))
@@ -408,11 +422,12 @@ async def channels_panel(event):
         return
 
     channels = await get_publish_channels()
-    lines = ["📡 <b>Ulangan kanallar</b>"]
+    lines = ["📡 <b>Kanal boshqaruvi (CRUD)</b>"]
     if channels:
         for item in channels[:30]:
             title = item.get("title") or "-"
-            lines.append(f"• <code>{item['channel_id']}</code> — {title}")
+            required = "✅" if int(item.get("is_required", 1) or 0) else "❌"
+            lines.append(f"• <code>{item['channel_id']}</code> — {title} | Majburiy: {required}")
     else:
         lines.append("(bo'sh)")
 
@@ -421,6 +436,8 @@ async def channels_panel(event):
 
     b = InlineKeyboardBuilder()
     b.row(InlineKeyboardButton(text="➕ Kanal qo'shish", callback_data="add_channel"))
+    b.row(InlineKeyboardButton(text="✏️ Kanalni tahrirlash", callback_data="edit_channel"))
+    b.row(InlineKeyboardButton(text="🔁 Majburiy ON/OFF", callback_data="toggle_channel_required"))
     b.row(InlineKeyboardButton(text="➖ Kanal o'chirish", callback_data="remove_channel"))
 
     text = "\n".join(lines)
@@ -443,7 +460,8 @@ async def add_channel_start(cb: CallbackQuery, state: FSMContext):
         "1️⃣ Kanaldan biror xabar forward qiling\n"
         "   (Bot avtomatik aniqlaydi)\n\n"
         "2️⃣ Yoki qo'lda yozing:\n"
-        "   <code>-1001234567890|Kanal nomi</code>",
+        "   <code>-1001234567890|Kanal nomi|https://t.me/kanal</code>\n\n"
+        "Eslatma: yangi kanal avtomatik majburiy obuna kanaliga qo'shiladi.",
         parse_mode="HTML",
         reply_markup=cancel_kb(),
     )
@@ -457,15 +475,16 @@ async def add_channel_finish(msg: Message, state: FSMContext):
         return
 
     raw = msg.text.strip()
-    channel_id, title = (raw.split("|", 1) + [""])[:2]
-    channel_id = channel_id.strip()
-    title = title.strip() or "Kanal"
+    parts = raw.split("|")
+    channel_id = parts[0].strip() if len(parts) > 0 else ""
+    title = parts[1].strip() if len(parts) > 1 else "Kanal"
+    join_link = parts[2].strip() if len(parts) > 2 else ""
 
     if not channel_id:
         await msg.answer("❗ Kanal ID kiriting")
         return
 
-    await add_publish_channel(channel_id, title, msg.from_user.id)
+    await add_publish_channel(channel_id, title, msg.from_user.id, join_link=join_link, is_required=1)
     await state.clear()
     await msg.answer("✅ Kanal qo'shildi", reply_markup=admin_kb())
 
@@ -484,6 +503,7 @@ async def add_channel_forward(msg: Message, state: FSMContext):
 
     channel_id = str(channel.id)
     title = channel.title or "Kanal"
+    join_link = f"https://t.me/{channel.username}" if channel.username else ""
 
     # Botning adminligini tekshirish
     try:
@@ -495,9 +515,88 @@ async def add_channel_forward(msg: Message, state: FSMContext):
         await msg.answer(f"❌ Xato: {e}")
         return
 
-    await add_publish_channel(channel_id, title, msg.from_user.id)
+    await add_publish_channel(channel_id, title, msg.from_user.id, join_link=join_link, is_required=1)
     await state.clear()
     await msg.answer(f"✅ Kanal qo'shildi: {title}\nID: <code>{channel_id}</code>", parse_mode="HTML", reply_markup=admin_kb())
+
+
+@router.callback_query(F.data == "edit_channel")
+async def edit_channel_start(cb: CallbackQuery, state: FSMContext):
+    if not await is_admin(cb.from_user.id):
+        return
+
+    await state.set_state(ChannelState.edit_channel)
+    await cb.answer()
+    await cb.message.answer(
+        "✏️ <b>Kanalni tahrirlash</b>\n\n"
+        "Format:\n"
+        "<code>-1001234567890|Yangi nom|https://t.me/yangi_link</code>\n\n"
+        "Linkni o'chirish uchun 3-qismni bo'sh qoldiring.",
+        parse_mode="HTML",
+        reply_markup=cancel_kb(),
+    )
+
+
+@router.message(ChannelState.edit_channel, F.text)
+async def edit_channel_finish(msg: Message, state: FSMContext):
+    if msg.text == "❌ Bekor qilish":
+        await state.clear()
+        await msg.answer("❌ Bekor", reply_markup=admin_kb())
+        return
+
+    parts = msg.text.strip().split("|")
+    if len(parts) < 2:
+        await msg.answer("❗ Format: <code>id|nom|link</code>", parse_mode="HTML")
+        return
+
+    channel_id = parts[0].strip()
+    title = parts[1].strip()
+    join_link = parts[2].strip() if len(parts) > 2 else ""
+
+    channel = await get_publish_channel(channel_id)
+    if not channel:
+        await msg.answer("❌ Bunday kanal topilmadi")
+        return
+
+    await update_publish_channel(channel_id, title=title or channel.get("title", "Kanal"), join_link=join_link)
+    await state.clear()
+    await msg.answer("✅ Kanal tahrirlandi", reply_markup=admin_kb())
+
+
+@router.callback_query(F.data == "toggle_channel_required")
+async def toggle_channel_required_start(cb: CallbackQuery, state: FSMContext):
+    if not await is_admin(cb.from_user.id):
+        return
+
+    await state.set_state(ChannelState.toggle_required)
+    await cb.answer()
+    await cb.message.answer(
+        "🔁 <b>Majburiy obuna ON/OFF</b>\n\n"
+        "Kanal ID yuboring.\n"
+        "Masalan: <code>-1001234567890</code>",
+        parse_mode="HTML",
+        reply_markup=cancel_kb(),
+    )
+
+
+@router.message(ChannelState.toggle_required, F.text)
+async def toggle_channel_required_finish(msg: Message, state: FSMContext):
+    if msg.text == "❌ Bekor qilish":
+        await state.clear()
+        await msg.answer("❌ Bekor", reply_markup=admin_kb())
+        return
+
+    channel_id = msg.text.strip()
+    channel = await get_publish_channel(channel_id)
+    if not channel:
+        await msg.answer("❌ Bunday kanal topilmadi")
+        return
+
+    new_value = 0 if int(channel.get("is_required", 1) or 0) else 1
+    await update_publish_channel(channel_id, is_required=new_value)
+    await state.clear()
+    status = "yoqildi ✅" if new_value else "o'chirildi ❌"
+    await msg.answer(f"✅ Majburiy obuna {status}", reply_markup=admin_kb())
 
 
 @router.callback_query(F.data == "remove_channel")
@@ -649,14 +748,301 @@ async def del_ep_confirm(cb: CallbackQuery):
     await cb.answer(f"✅ {ep_num}-qism o'chirildi")
 
 
-@router.callback_query(F.data.regexp(r"^del_anime:\d+$"))
-async def del_anime(cb: CallbackQuery):
+# ===================== Anime ro'yxati va boshqaruvi =====================
+@router.callback_query(F.data.regexp(r"^admin_anime_list(?::\d+)?$"))
+async def admin_anime_list(cb: CallbackQuery):
+    if not await is_admin(cb.from_user.id):
+        await cb.answer("❌ Ruxsat yo'q", show_alert=True)
+        return
+
+    page = 1
+    if ":" in cb.data:
+        page = int(cb.data.split(":")[1])
+
+    items = await get_all_anime(page=page, per_page=10, include_inactive=True)
+    total = await get_total_anime_count(include_inactive=True)
+    total_pages = max(1, (total + 10 - 1) // 10)
+
+    from aiogram.utils.keyboard import InlineKeyboardBuilder
+    from aiogram.types import InlineKeyboardButton
+
+    b = InlineKeyboardBuilder()
+    for a in items:
+        t = a.get("title_en") or a.get("title_jp") or "?"
+        t = (t[:35] + "...") if len(t) > 35 else t
+        ep_count = a.get("total_ep", 0)
+        status = "🟢" if int(a.get("is_active", 1) or 0) else "🔴"
+        b.row(InlineKeyboardButton(text=f"{status} {t} ({ep_count} ep)", callback_data=f"admin_anime_detail:{a['id']}"))
+
+    # Sahifalash
+    nav = []
+    if page > 1:
+        nav.append(InlineKeyboardButton(text="⬅️ Oldingi", callback_data=f"admin_anime_list:{page-1}"))
+    nav.append(InlineKeyboardButton(text=f"📄 {page}/{total_pages}", callback_data="noop"))
+    if page < total_pages:
+        nav.append(InlineKeyboardButton(text="Keyingi ➡️", callback_data=f"admin_anime_list:{page+1}"))
+    if nav:
+        b.row(*nav)
+
+    await cb.answer()
+    await cb.message.answer(
+        f"📋 <b>Anime ro'yxati</b> — {total} ta\n\nAnime tanlang:",
+        parse_mode="HTML",
+        reply_markup=b.as_markup()
+    )
+
+
+@router.callback_query(F.data.regexp(r"^admin_anime_detail:\d+$"))
+async def admin_anime_detail(cb: CallbackQuery):
     if not await is_admin(cb.from_user.id):
         return
 
     anime_id = int(cb.data.split(":")[1])
+    anime = await get_anime_by_id(anime_id)
+
+    if not anime:
+        await cb.answer("❌ Anime topilmadi", show_alert=True)
+        return
+
+    episodes = await get_episodes(anime_id)
+    ep_count = len(episodes)
+
+    title = anime.get("title_en") or anime.get("title_jp") or "?"
+    genres = anime.get("genres") or "N/A"
+    status = anime.get("status") or "N/A"
+
+    from aiogram.utils.keyboard import InlineKeyboardBuilder
+    from aiogram.types import InlineKeyboardButton
+
+    b = InlineKeyboardBuilder()
+    b.row(InlineKeyboardButton(text="✏️ Nomi", callback_data=f"edit_anime_title:{anime_id}"))
+    b.row(InlineKeyboardButton(text="🎭 Janr", callback_data=f"edit_anime_genres:{anime_id}"))
+    b.row(InlineKeyboardButton(text="📁 Turi (MOVIE/SERIAL)", callback_data=f"edit_anime_status:{anime_id}"))
+    b.row(InlineKeyboardButton(text="🖼 Rasm", callback_data=f"edit_anime_cover:{anime_id}"))
+    b.row(InlineKeyboardButton(text="📤 Epizod yuklash", callback_data=f"upload_ep_for:{anime_id}"))
+    b.row(InlineKeyboardButton(text="📋 Epizodlar", callback_data=f"manage_eps:{anime_id}"))
+    if int(anime.get("is_active", 1) or 0):
+        b.row(InlineKeyboardButton(text="🗑 Animeni o'chirish", callback_data=f"del_anime:{anime_id}"))
+    else:
+        b.row(InlineKeyboardButton(text="♻️ Qayta tiklash", callback_data=f"restore_anime:{anime_id}"))
+    b.row(InlineKeyboardButton(text="🔙 Orqaga", callback_data="admin_anime_list"))
+
+    text = (
+        f"🎌 <b>{title}</b>\n\n"
+        f"🆔 ID: <code>{anime_id}</code>\n"
+        f"🎭 Janr: {genres}\n"
+        f"📁 Status: {status}\n"
+        f"🔘 Holat: {'Aktiv' if int(anime.get('is_active', 1) or 0) else 'Noaktiv'}\n"
+        f"📺 Epizodlar: <b>{ep_count}</b> ta\n"
+    )
+
+    cover = anime.get("cover_image")
+
+    await cb.answer()
+    if cover:
+        await cb.message.answer_photo(photo=cover, caption=text, parse_mode="HTML", reply_markup=b.as_markup())
+    else:
+        await cb.message.answer(text, parse_mode="HTML", reply_markup=b.as_markup())
+
+
+@router.callback_query(F.data.regexp(r"^upload_ep_for:\d+$"))
+async def upload_ep_for_anime(cb: CallbackQuery, state: FSMContext):
+    if not await is_admin(cb.from_user.id):
+        return
+
+    anime_id = int(cb.data.split(":")[1])
+    anime = await get_anime_by_id(anime_id)
+
+    if not anime:
+        await cb.answer("❌ Anime topilmadi", show_alert=True)
+        return
+
+    await state.update_data(anime_id=anime_id)
+    await state.set_state(UploadEpState.ep_number)
+    await cb.answer()
+    await cb.message.answer("Epizod raqamini yuboring:", reply_markup=cancel_kb())
+
+
+@router.callback_query(F.data.regexp(r"^del_anime:\d+$"))
+async def del_anime_confirm(cb: CallbackQuery):
+    if not await is_admin(cb.from_user.id):
+        return
+
+    anime_id = int(cb.data.split(":")[1])
+    anime = await get_anime_by_id(anime_id)
+
+    from aiogram.utils.keyboard import InlineKeyboardBuilder
+    from aiogram.types import InlineKeyboardButton
+
+    b = InlineKeyboardBuilder()
+    b.row(
+        InlineKeyboardButton(text="✅ Ha, o'chirish", callback_data=f"confirm_del_anime:{anime_id}"),
+        InlineKeyboardButton(text="❌ Bekor", callback_data="admin_anime_list")
+    )
+
+    title = anime.get("title_en") or anime.get("title_jp") or "?"
+    await cb.answer()
+    await cb.message.answer(
+        f"⚠️ <b>Ishonchingiz komilmi?</b>\n\n"
+        f"🎌 {title}\n"
+        f"🆔 ID: {anime_id}\n\n"
+        f"Bu anime va barcha epizodlari o'chiriladi!",
+        parse_mode="HTML",
+        reply_markup=b.as_markup()
+    )
+
+
+@router.callback_query(F.data.regexp(r"^confirm_del_anime:\d+$"))
+async def del_anime_execute(cb: CallbackQuery):
+    if not await is_admin(cb.from_user.id):
+        return
+
+    anime_id = int(cb.data.split(":")[1])
+    anime = await get_anime_by_id(anime_id)
+    title = anime.get("title_en") or anime.get("title_jp") or "?" if anime else "Anime"
+
     await delete_anime(anime_id)
-    await cb.answer("✅ Anime o'chirildi")
+    await cb.answer(f"✅ {title} o'chirildi", show_alert=True)
+    await cb.message.delete()
+
+    # Anime ro'yxatiga qaytish
+    from aiogram.utils.keyboard import InlineKeyboardBuilder
+    from aiogram.types import InlineKeyboardButton
+
+    items = await get_all_anime(page=1, per_page=10, include_inactive=True)
+    total = await get_total_anime_count(include_inactive=True)
+
+    b = InlineKeyboardBuilder()
+    for a in items:
+        t = a.get("title_en") or a.get("title_jp") or "?"
+        b.row(InlineKeyboardButton(text=f"🎌 {t}", callback_data=f"admin_anime_detail:{a['id']}"))
+
+    if total > 10:
+        b.row(InlineKeyboardButton(text="➡️ Keyingi", callback_data="admin_anime_list:2"))
+
+    await cb.message.answer(
+        f"📋 <b>Anime ro'yxati</b> — {total} ta\n\nAnime tanlang:",
+        parse_mode="HTML",
+        reply_markup=b.as_markup()
+    )
+
+
+@router.callback_query(F.data.regexp(r"^restore_anime:\d+$"))
+async def restore_anime_execute(cb: CallbackQuery):
+    if not await is_admin(cb.from_user.id):
+        return
+
+    anime_id = int(cb.data.split(":")[1])
+    await set_anime_active(anime_id, 1)
+    await cb.answer("✅ Anime qayta tiklandi")
+    await admin_anime_detail(cb)
+
+
+@router.callback_query(F.data.regexp(r"^edit_anime_title:\d+$"))
+async def edit_anime_title_start(cb: CallbackQuery, state: FSMContext):
+    if not await is_admin(cb.from_user.id):
+        return
+    anime_id = int(cb.data.split(":")[1])
+    await state.set_state(EditAnimeState.title)
+    await state.update_data(anime_id=anime_id)
+    await cb.answer()
+    await cb.message.answer("Yangi anime nomini yuboring:", reply_markup=cancel_kb())
+
+
+@router.message(EditAnimeState.title, F.text)
+async def edit_anime_title_finish(msg: Message, state: FSMContext):
+    if msg.text == "❌ Bekor qilish":
+        await state.clear()
+        await msg.answer("❌ Bekor", reply_markup=admin_kb())
+        return
+    data = await state.get_data()
+    anime_id = int(data.get("anime_id"))
+    await update_anime_fields(anime_id, title_en=msg.text.strip())
+    await state.clear()
+    await msg.answer("✅ Nom yangilandi", reply_markup=admin_kb())
+
+
+@router.callback_query(F.data.regexp(r"^edit_anime_genres:\d+$"))
+async def edit_anime_genres_start(cb: CallbackQuery, state: FSMContext):
+    if not await is_admin(cb.from_user.id):
+        return
+    anime_id = int(cb.data.split(":")[1])
+    await state.set_state(EditAnimeState.genres)
+    await state.update_data(anime_id=anime_id)
+    await cb.answer()
+    await cb.message.answer("Yangi janrni yuboring (vergul bilan):", reply_markup=cancel_kb())
+
+
+@router.message(EditAnimeState.genres, F.text)
+async def edit_anime_genres_finish(msg: Message, state: FSMContext):
+    if msg.text == "❌ Bekor qilish":
+        await state.clear()
+        await msg.answer("❌ Bekor", reply_markup=admin_kb())
+        return
+    data = await state.get_data()
+    anime_id = int(data.get("anime_id"))
+    await update_anime_fields(anime_id, genres=msg.text.strip())
+    await state.clear()
+    await msg.answer("✅ Janr yangilandi", reply_markup=admin_kb())
+
+
+@router.callback_query(F.data.regexp(r"^edit_anime_status:\d+$"))
+async def edit_anime_status_start(cb: CallbackQuery, state: FSMContext):
+    if not await is_admin(cb.from_user.id):
+        return
+    anime_id = int(cb.data.split(":")[1])
+    await state.set_state(EditAnimeState.status)
+    await state.update_data(anime_id=anime_id)
+    await cb.answer()
+    await cb.message.answer("Turi yuboring: MOVIE yoki SERIAL", reply_markup=cancel_kb())
+
+
+@router.message(EditAnimeState.status, F.text)
+async def edit_anime_status_finish(msg: Message, state: FSMContext):
+    if msg.text == "❌ Bekor qilish":
+        await state.clear()
+        await msg.answer("❌ Bekor", reply_markup=admin_kb())
+        return
+
+    status = msg.text.strip().upper()
+    if status not in {"MOVIE", "SERIAL"}:
+        await msg.answer("❗ Faqat MOVIE yoki SERIAL")
+        return
+
+    data = await state.get_data()
+    anime_id = int(data.get("anime_id"))
+    await update_anime_fields(anime_id, status=status)
+    await state.clear()
+    await msg.answer("✅ Tur yangilandi", reply_markup=admin_kb())
+
+
+@router.callback_query(F.data.regexp(r"^edit_anime_cover:\d+$"))
+async def edit_anime_cover_start(cb: CallbackQuery, state: FSMContext):
+    if not await is_admin(cb.from_user.id):
+        return
+    anime_id = int(cb.data.split(":")[1])
+    await state.set_state(EditAnimeState.cover)
+    await state.update_data(anime_id=anime_id)
+    await cb.answer()
+    await cb.message.answer("Yangi rasm yuboring:", reply_markup=cancel_kb())
+
+
+@router.message(EditAnimeState.cover, F.photo)
+async def edit_anime_cover_finish(msg: Message, state: FSMContext):
+    data = await state.get_data()
+    anime_id = int(data.get("anime_id"))
+    await update_anime_fields(anime_id, cover_image=msg.photo[-1].file_id)
+    await state.clear()
+    await msg.answer("✅ Rasm yangilandi", reply_markup=admin_kb())
+
+
+@router.message(EditAnimeState.cover, F.text)
+async def edit_anime_cover_text(msg: Message, state: FSMContext):
+    if msg.text == "❌ Bekor qilish":
+        await state.clear()
+        await msg.answer("❌ Bekor", reply_markup=admin_kb())
+        return
+    await msg.answer("❗ Rasm yuboring yoki bekor qiling")
 
 
 # ===================== Majburiy obuna sozlamalari =====================
@@ -666,137 +1052,4 @@ async def subscribe_settings_menu(cb: CallbackQuery):
         await cb.answer("❌ Ruxsat yo'q", show_alert=True)
         return
 
-    subscribe_channel = await get_setting("subscribe_channel", "")
-    subscribe_channel_id = await get_setting("subscribe_channel_id", "")
-
-    from aiogram.utils.keyboard import InlineKeyboardBuilder
-    from aiogram.types import InlineKeyboardButton
-
-    b = InlineKeyboardBuilder()
-    b.row(InlineKeyboardButton(text="✏️ Kanal o'rnatish", callback_data="set_subscribe_channel"))
-    b.row(InlineKeyboardButton(text="🗑 Obunani o'chirish", callback_data="clear_subscribe_channel"))
-
-    status = "✅ Yoqilgan" if subscribe_channel_id else "❌ O'chirilgan"
-    text = (
-        f"🔐 <b>Majburiy obuna sozlamalari</b>\n\n"
-        f"Status: {status}\n"
-        f"Kanal: {subscribe_channel or 'Belgilanmagan'}\n"
-        f"Kanal ID: <code>{subscribe_channel_id or 'Yo\'q'}</code>\n\n"
-        f"📌 Majburiy obuna yoqish uchun:\n"
-        f"1. <b>✏️ Kanal o'rnatish</b> tugmasini bosing\n"
-        f"2. Kanaldan biror xabar forward qiling yoki\n"
-        f"3. <code>@username|channel_id</code> formatida yuboring"
-    )
-
-    await cb.answer()
-    await cb.message.answer(text, parse_mode="HTML", reply_markup=b.as_markup())
-
-
-@router.callback_query(F.data == "set_subscribe_channel")
-async def set_subscribe_channel_start(cb: CallbackQuery, state: FSMContext):
-    if not await is_admin(cb.from_user.id):
-        await cb.answer("❌ Ruxsat yo'q", show_alert=True)
-        return
-
-    await state.set_state(SubscribeSettingState.waiting_channel)
-    await cb.answer()
-    await cb.message.answer(
-        "📢 <b>Majburiy obuna kanali o'rnatish</b>\n\n"
-        "1️⃣ Kanaldan biror xabar forward qiling\n"
-        "   (Bot avtomatik aniqlaydi)\n\n"
-        "2️⃣ Yoki qo'lda yozing:\n"
-        "   <code>@kanalUsername|-1001234567890</code>\n\n"
-        "Misol: <code>@anime_uz|-1001234567890</code>",
-        parse_mode="HTML",
-        reply_markup=cancel_kb(),
-    )
-
-
-@router.message(SubscribeSettingState.waiting_channel, F.forward_from_chat)
-async def set_subscribe_from_forward(msg: Message, state: FSMContext):
-    channel = msg.forward_from_chat
-    if channel.type not in ("channel", "supergroup"):
-        await msg.answer("❗ Faqat kanal yoki guruh forward qiling")
-        return
-
-    channel_id = str(channel.id)
-    channel_username = f"@{channel.username}" if channel.username else channel.title or "Kanal"
-
-    # Botning adminligini tekshirish
-    try:
-        member = await msg.bot.get_chat_member(channel.id, msg.bot.id)
-        if member.status not in ("administrator", "creator"):
-            await msg.answer("⚠️ Bot bu kanalda admin emas! Botni kanalga admin qilib qo'shing.")
-            return
-    except Exception as e:
-        await msg.answer(f"❌ Xato: {e}")
-        return
-
-    await set_setting("subscribe_channel", channel_username)
-    await set_setting("subscribe_channel_id", channel_id)
-    await state.clear()
-
-    await msg.answer(
-        f"✅ <b>Majburiy obuna yoqildi!</b>\n\n"
-        f"📢 Kanal: {channel_username}\n"
-        f"🆔 ID: <code>{channel_id}</code>\n\n"
-        f"Endi barcha foydalanuvchilar bu kanalga obuna bo'lishi shart.",
-        parse_mode="HTML",
-        reply_markup=admin_kb(),
-    )
-
-
-@router.message(SubscribeSettingState.waiting_channel, F.text)
-async def set_subscribe_manual(msg: Message, state: FSMContext):
-    if msg.text == "❌ Bekor qilish":
-        await state.clear()
-        await msg.answer("❌ Bekor qilindi", reply_markup=admin_kb())
-        return
-
-    raw = msg.text.strip()
-    if "|" not in raw:
-        await msg.answer("❗ Format: <code>@username|channel_id</code>", parse_mode="HTML")
-        return
-
-    channel_username, channel_id = raw.split("|", 1)
-    channel_username = channel_username.strip()
-    channel_id = channel_id.strip()
-
-    if not channel_username or not channel_id:
-        await msg.answer("❗ Ikkala qiymat ham kerak: username va ID")
-        return
-
-    # ID formatini tekshirish
-    if not (channel_id.lstrip("-").isdigit() or channel_id.startswith("@")):
-        await msg.answer("❗ Kanal ID raqam bo'lishi kerak, masalan: -1001234567890")
-        return
-
-    await set_setting("subscribe_channel", channel_username)
-    await set_setting("subscribe_channel_id", channel_id)
-    await state.clear()
-
-    await msg.answer(
-        f"✅ <b>Majburiy obuna yoqildi!</b>\n\n"
-        f"📢 Kanal: {channel_username}\n"
-        f"🆔 ID: <code>{channel_id}</code>\n\n"
-        f"⚠️ Agar bot kanalda admin bo'lmasa, uni admin qilib qo'shing!",
-        parse_mode="HTML",
-        reply_markup=admin_kb(),
-    )
-
-
-@router.callback_query(F.data == "clear_subscribe_channel")
-async def clear_subscribe_channel(cb: CallbackQuery):
-    if not await is_admin(cb.from_user.id):
-        await cb.answer("❌ Ruxsat yo'q", show_alert=True)
-        return
-
-    await set_setting("subscribe_channel", "")
-    await set_setting("subscribe_channel_id", "")
-
-    await cb.answer("✅ Majburiy obuna o'chirildi", show_alert=True)
-    await cb.message.answer(
-        "✅ <b>Majburiy obuna o'chirildi</b>\n\n"
-        "Endi foydalanuvchilar kanalga obuna bo'lmasdan ham botdan foydalanishlari mumkin.",
-        parse_mode="HTML",
-    )
+    await channels_panel(cb)

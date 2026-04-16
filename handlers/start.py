@@ -5,8 +5,8 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 
 from database.db import log_action, register_user
-from utils.keyboards import get_main_kb, reopen_kb
-from middlewares.subscribe import check_subscribed
+from utils.keyboards import get_main_kb, reopen_kb, subscribe_kb
+from middlewares.subscribe import check_subscribed, get_missing_channels
 
 router = Router()
 
@@ -111,7 +111,13 @@ async def check_sub_cb(cb: CallbackQuery):
             pass
         await cb.message.answer("✅ Endi botdan foydalanishingiz mumkin", reply_markup=await get_main_kb(cb.from_user.id))
     else:
-        await cb.answer("❌ Siz hali obuna bo'lmagansiz", show_alert=True)
+        missing = await get_missing_channels(cb.bot, cb.from_user.id)
+        lines = ["❌ Siz hali quyidagi kanallarga obuna bo'lmagansiz:", ""]
+        for i, channel in enumerate(missing, 1):
+            title = channel.get("title") or channel.get("channel_id") or "Kanal"
+            lines.append(f"{i}. {title}")
+        await cb.answer("❌ Hali obuna bo'lmagansiz", show_alert=True)
+        await cb.message.answer("\n".join(lines), reply_markup=subscribe_kb(missing))
 
 
 @router.callback_query(F.data == "noop")

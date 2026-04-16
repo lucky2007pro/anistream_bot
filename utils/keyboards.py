@@ -40,10 +40,22 @@ async def get_main_kb(user_id: int):
     return admin_kb() if await db_is_admin(user_id) else main_kb()
 
 
-def subscribe_kb(subscribe_channel: str = "") -> InlineKeyboardMarkup:
+def subscribe_kb(subscribe_channel: str | list[dict] = "") -> InlineKeyboardMarkup:
     b = InlineKeyboardBuilder()
-    if subscribe_channel:
+
+    if isinstance(subscribe_channel, list):
+        for idx, channel in enumerate(subscribe_channel, 1):
+            title = channel.get("title") or channel.get("channel_id") or f"Kanal {idx}"
+            link = (channel.get("join_link") or "").strip()
+            if not link:
+                channel_id = str(channel.get("channel_id", "")).strip()
+                if channel_id.startswith("@"):
+                    link = f"https://t.me/{channel_id.lstrip('@')}"
+            if link:
+                b.row(InlineKeyboardButton(text=f"📢 {title}", url=link))
+    elif subscribe_channel:
         b.row(InlineKeyboardButton(text="📢 Kanalga o'tish", url=f"https://t.me/{subscribe_channel.lstrip('@')}"))
+
     b.row(InlineKeyboardButton(text="✅ Obuna bo'ldim, tekshirish", callback_data="check_subscribe"))
     return b.as_markup()
 
