@@ -350,12 +350,10 @@ async def receive_video(msg: Message, state: FSMContext):
             reply_markup=admin_kb(),
         )
 
-    # Ulangan kanallarga faqat rasm yuborish
+    # Ulangan kanallarga video yuborish
     channels = await get_publish_channels()
     if not channels:
         await msg.answer("ℹ️ Ulangan kanal yo'q. '📡 Kanallar' orqali qo'shing.")
-    elif not cover:
-        await msg.answer("⚠️ Anime rasmi yo'q, kanallarga rasmli e'lon yuborilmadi.")
     else:
         me = await msg.bot.get_me()
         deep_link = f"https://t.me/{me.username}?start=anime_{anime_id}"
@@ -364,22 +362,27 @@ async def receive_video(msg: Message, state: FSMContext):
         from aiogram.types import InlineKeyboardButton
 
         b = InlineKeyboardBuilder()
-        b.row(InlineKeyboardButton(text="🎬 Botda ko'rish", url=deep_link))
+        b.row(InlineKeyboardButton(text="▷ Tomosha qilish ◁", url=deep_link))
 
         caption = (
             f"🎌 <b>{title}</b>\n"
-            f"🆔 ID: <code>{anime_id}</code>\n"
+            f"📺 <b>{ep_number}-qism</b>\n\n"
             f"🎭 Janr: {genres}\n"
             f"📁 Turi: {kind}\n"
-            f"📺 Qism: {ep_number}\n\n"
-            "👉 Ko'rish uchun tugmani bosing"
         )
 
         sent_ok, sent_fail = 0, 0
         for ch in channels:
             try:
                 channel_id = ch["channel_id"]
-                await msg.bot.send_photo(channel_id, photo=cover, caption=caption, parse_mode="HTML", reply_markup=b.as_markup())
+                await msg.bot.send_video(
+                    chat_id=channel_id,
+                    video=video.file_id,
+                    caption=caption,
+                    parse_mode="HTML",
+                    reply_markup=b.as_markup(),
+                    supports_streaming=True
+                )
                 sent_ok += 1
             except Exception:
                 sent_fail += 1
@@ -428,8 +431,11 @@ async def add_channel_start(cb: CallbackQuery, state: FSMContext):
     await state.set_state(ChannelState.add_channel)
     await cb.answer()
     await cb.message.answer(
-        "Kanal ID va nom yuboring:\n"
-        "<code>-1001234567890|Asosiy kanal</code>",
+        "📡 <b>Kanal qo'shish</b>\n\n"
+        "1️⃣ Kanaldan biror xabar forward qiling\n"
+        "   (Bot avtomatik aniqlaydi)\n\n"
+        "2️⃣ Yoki qo'lda yozing:\n"
+        "   <code>-1001234567890|Kanal nomi</code>",
         parse_mode="HTML",
         reply_markup=cancel_kb(),
     )
@@ -454,6 +460,36 @@ async def add_channel_finish(msg: Message, state: FSMContext):
     await add_publish_channel(channel_id, title, msg.from_user.id)
     await state.clear()
     await msg.answer("✅ Kanal qo'shildi", reply_markup=admin_kb())
+
+
+@router.message(ChannelState.add_channel, F.forward_from_chat)
+async def add_channel_forward(msg: Message, state: FSMContext):
+    if msg.text == "❌ Bekor qilish":
+        await state.clear()
+        await msg.answer("❌ Bekor", reply_markup=admin_kb())
+        return
+
+    channel = msg.forward_from_chat
+    if channel.type not in ("channel", "supergroup"):
+        await msg.answer("❗ Faqat kanal yoki guruh forward qiling")
+        return
+
+    channel_id = str(channel.id)
+    title = channel.title or "Kanal"
+
+    # Botning adminligini tekshirish
+    try:
+        member = await msg.bot.get_chat_member(channel.id, msg.bot.id)
+        if member.status not in ("administrator", "creator"):
+            await msg.answer("⚠️ Bot bu kanalda admin emas!")
+            return
+    except Exception as e:
+        await msg.answer(f"❌ Xato: {e}")
+        return
+
+    await add_publish_channel(channel_id, title, msg.from_user.id)
+    await state.clear()
+    await msg.answer(f"✅ Kanal qo'shildi: {title}\nID: <code>{channel_id}</code>", parse_mode="HTML", reply_markup=admin_kb())
 
 
 @router.callback_query(F.data == "remove_channel")

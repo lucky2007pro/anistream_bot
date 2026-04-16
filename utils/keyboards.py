@@ -97,6 +97,20 @@ def episode_watch_kb(anime_id: int, ep_num: int, total_eps: int) -> InlineKeyboa
     return b.as_markup()
 
 
+def rating_kb(anime_id: int) -> InlineKeyboardMarkup:
+    b = InlineKeyboardBuilder()
+    row = []
+    for score in range(1, 11):
+        row.append(InlineKeyboardButton(text=f"{score}⭐", callback_data=f"do_rate:{anime_id}:{score}"))
+        if len(row) == 5:
+            b.row(*row)
+            row = []
+    if row:
+        b.row(*row)
+    b.row(InlineKeyboardButton(text="🔙 Orqaga", callback_data=f"local_anime:{anime_id}"))
+    return b.as_markup()
+
+
 def search_results_kb(results, page, total_pages, query) -> InlineKeyboardMarkup:
     b = InlineKeyboardBuilder()
     for a in results:
