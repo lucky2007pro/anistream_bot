@@ -1,0 +1,89 @@
+2026-03-18 21:57:24,282 | INFO | database.db | ✅ Database tayyor
+2026-03-18 21:57:28,574 | INFO | __main__ | 🚀 Bot ishga tushdi: @animelar_dev_bot
+2026-03-18 21:57:28,575 | INFO | __main__ | ==================================================
+2026-03-18 22:06:52,062 | INFO | __main__ | Bot to'xtatildi
+2026-03-18 22:21:40,203 | INFO | database.db | ✅ Database tayyor
+2026-03-18 22:29:51,522 | INFO | __main__ | Bot yopildi
+2026-03-18 22:29:56,531 | INFO | database.db | ✅ Database tayyor
+2026-03-18 22:30:26,310 | WARNING | api.consumet | Consumet (https://api.consumet.org): 0, message='Attempt to decode JSON with unexpected mimetype: text/html; charset=utf-8', url=URL('https://github.com/consumet/api.consumet.org?tab=readme-ov-file#installation')
+2026-03-18 22:30:46,479 | WARNING | api.consumet | Consumet (https://consumet-api.onrender.com): 
+2026-03-18 23:07:32,903 | WARNING | api.consumet | Consumet (https://api.consumet.org): 0, message='Attempt to decode JSON with unexpected mimetype: text/html; charset=utf-8', url=URL('https://github.com/consumet/api.consumet.org?tab=readme-ov-file#installation')
+2026-03-18 23:07:41,396 | WARNING | api.consumet | Consumet (https://api.consumet.org): 0, message='Attempt to decode JSON with unexpected mimetype: text/html; charset=utf-8', url=URL('https://github.com/consumet/api.consumet.org?tab=readme-ov-file#installation')
+2026-03-18 23:07:53,477 | WARNING | api.consumet | Consumet (https://consumet-api.onrender.com): 
+2026-03-18 23:08:01,472 | WARNING | api.consumet | Consumet (https://consumet-api.onrender.com): 
+2026-03-18 23:20:24,729 | INFO | __main__ | Bot yopildi
+2026-03-18 23:20:40,682 | INFO | database.db | ✅ Database tayyor
+2026-03-18 23:25:01,851 | ERROR | aiogram.event | Cause exception while process update id=787971716 by bot id=8770431538
+TelegramBadRequest: Telegram server says - Bad Request: message caption is too long
+Traceback (most recent call last):
+  File "C:\Users\user\AppData\Local\Programs\Python\Python312\Lib\site-packages\aiogram\dispatcher\dispatcher.py", line 309, in _process_update
+    response = await self.feed_update(bot, update, **kwargs)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\user\AppData\Local\Programs\Python\Python312\Lib\site-packages\aiogram\dispatcher\dispatcher.py", line 158, in feed_update
+    response = await self.update.wrap_outer_middleware(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\user\AppData\Local\Programs\Python\Python312\Lib\site-packages\aiogram\dispatcher\middlewares\error.py", line 25, in __call__
+    return await handler(event, data)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\user\AppData\Local\Programs\Python\Python312\Lib\site-packages\aiogram\dispatcher\middlewares\user_context.py", line 56, in __call__
+    return await handler(event, data)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\user\AppData\Local\Programs\Python\Python312\Lib\site-packages\aiogram\fsm\middleware.py", line 42, in __call__
+    return await handler(event, data)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\user\AppData\Local\Programs\Python\Python312\Lib\site-packages\aiogram\dispatcher\event\telegram.py", line 121, in trigger
+    return await wrapped_inner(event, kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\user\AppData\Local\Programs\Python\Python312\Lib\site-packages\aiogram\dispatcher\event\handler.py", line 43, in call
+    return await wrapped()
+           ^^^^^^^^^^^^^^^
+  File "C:\Users\user\AppData\Local\Programs\Python\Python312\Lib\site-packages\aiogram\dispatcher\dispatcher.py", line 276, in _listen_update
+    return await self.propagate_event(update_type=update_type, event=event, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\user\AppData\Local\Programs\Python\Python312\Lib\site-packages\aiogram\dispatcher\router.py", line 146, in propagate_event
+    return await observer.wrap_outer_middleware(_wrapped, event=event, data=kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\user\AppData\Local\Programs\Python\Python312\Lib\site-packages\aiogram\dispatcher\router.py", line 141, in _wrapped
+    return await self._propagate_event(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\user\AppData\Local\Programs\Python\Python312\Lib\site-packages\aiogram\dispatcher\router.py", line 174, in _propagate_event
+    response = await router.propagate_event(update_type=update_type, event=event, **kwargs)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\user\AppData\Local\Programs\Python\Python312\Lib\site-packages\aiogram\dispatcher\router.py", line 146, in propagate_event
+    return await observer.wrap_outer_middleware(_wrapped, event=event, data=kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\user\AppData\Local\Programs\Python\Python312\Lib\site-packages\aiogram\dispatcher\router.py", line 141, in _wrapped
+    return await self._propagate_event(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\user\AppData\Local\Programs\Python\Python312\Lib\site-packages\aiogram\dispatcher\router.py", line 166, in _propagate_event
+    response = await observer.trigger(event, **kwargs)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\user\AppData\Local\Programs\Python\Python312\Lib\site-packages\aiogram\dispatcher\event\telegram.py", line 121, in trigger
+    return await wrapped_inner(event, kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\my_tg\anime_bot_aiogram\anime_bot_aiogram\middlewares\register.py", line 15, in __call__
+    return await handler(event, data)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\my_tg\anime_bot_aiogram\anime_bot_aiogram\middlewares\subscribe.py", line 29, in __call__
+    return await handler(event, data)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\user\AppData\Local\Programs\Python\Python312\Lib\site-packages\aiogram\dispatcher\event\handler.py", line 43, in call
+    return await wrapped()
+           ^^^^^^^^^^^^^^^
+  File "D:\my_tg\anime_bot_aiogram\anime_bot_aiogram\handlers\search.py", line 218, in trending
+    await msg.answer_photo(photo=cover, caption=text, parse_mode="HTML", reply_markup=kb)
+  File "C:\Users\user\AppData\Local\Programs\Python\Python312\Lib\site-packages\aiogram\methods\base.py", line 84, in emit
+    return await bot(self)
+           ^^^^^^^^^^^^^^^
+  File "C:\Users\user\AppData\Local\Programs\Python\Python312\Lib\site-packages\aiogram\client\bot.py", line 488, in __call__
+    return await self.session(self, method, timeout=request_timeout)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\user\AppData\Local\Programs\Python\Python312\Lib\site-packages\aiogram\client\session\base.py", line 254, in __call__
+    return cast(TelegramType, await middleware(bot, method))
+                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\user\AppData\Local\Programs\Python\Python312\Lib\site-packages\aiogram\client\session\aiohttp.py", line 189, in make_request
+    response = self.check_response(
+               ^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\user\AppData\Local\Programs\Python\Python312\Lib\site-packages\aiogram\client\session\base.py", line 120, in check_response
+    raise TelegramBadRequest(method=method, message=description)
+aiogram.exceptions.TelegramBadRequest: Telegram server says - Bad Request: message caption is too long

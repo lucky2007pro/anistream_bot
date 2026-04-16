@@ -1,0 +1,20 @@
+[Unit]
+Description=Anime Bot PRO (Aiogram)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/anime_bot_aiogram
+EnvironmentFile=/opt/anime_bot_aiogram/.env
+ExecStart=/opt/anime_bot_aiogram/venv/bin/python /opt/anime_bot_aiogram/bot.py
+Restart=always
+RestartSec=5
+User=animebot
+Group=animebot
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+
