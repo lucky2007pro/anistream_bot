@@ -152,6 +152,14 @@ async def init_db():
                 added_at      TEXT DEFAULT CURRENT_TIMESTAMP
             );
 
+            -- E'lon uchun ulangan kanallar
+            CREATE TABLE IF NOT EXISTS publish_channels (
+                channel_id    TEXT PRIMARY KEY,
+                title         TEXT,
+                added_by      INTEGER,
+                added_at      TEXT DEFAULT CURRENT_TIMESTAMP
+            );
+
             CREATE INDEX IF NOT EXISTS idx_fav_user    ON favorites(user_id);
             CREATE INDEX IF NOT EXISTS idx_hist_user   ON watch_history(user_id);
             CREATE INDEX IF NOT EXISTS idx_ep_anime    ON episodes(anime_id);
@@ -699,4 +707,36 @@ async def get_all_admin_ids() -> list[int]:
         cur = await db.execute("SELECT user_id FROM admins")
         ids.update(r[0] for r in await cur.fetchall())
     return sorted(ids)
+
+
+async def add_publish_channel(channel_id: str, title: str, added_by: int) -> None:
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            """
+            INSERT INTO publish_channels(channel_id, title, added_by)
+            VALUES(?, ?, ?)
+            ON CONFLICT(channel_id) DO UPDATE SET
+                title=excluded.title,
+                added_by=excluded.added_by
+            """,
+            (channel_id, title, added_by),
+        )
+        await db.commit()
+
+
+async def remove_publish_channel(channel_id: str) -> None:
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("DELETE FROM publish_channels WHERE channel_id=?", (channel_id,))
+        await db.commit()
+
+
+async def get_publish_channels() -> list[dict]:
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cur = await db.execute(
+            "SELECT channel_id, title, added_by, added_at FROM publish_channels ORDER BY added_at DESC"
+        )
+        rows = await cur.fetchall()
+    return [dict(r) for r in rows]
+
 

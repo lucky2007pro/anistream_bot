@@ -106,6 +106,7 @@ async def local_anime_cb(cb: CallbackQuery):
 # ═══════════════════════════════════════════════════════════════
 #  BARCHA ANIMALAR RO'YXATI
 # ═══════════════════════════════════════════════════════════════
+@router.message(F.text == "🎬 Barcha anime")
 @router.message(F.text == "🎬 Barcha animalar")
 async def all_anime_cmd(msg: Message):
     items = await get_all_anime(page=1, per_page=20)
