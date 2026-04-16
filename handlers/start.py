@@ -24,7 +24,7 @@ WELCOME = (
 HELP = (
     "🆘 <b>Yordam</b>\n\n"
     "🔍 <b>Qidirish</b> — nom bo'yicha qidirish\n"
-    "🎬 <b>Barcha anime</b> — katalog\n"
+    "🎬 <b>Barcha animelar</b> — katalog\n"
     "🆔 <b>ID bo'yicha ochish</b> — aniq anime ochish\n"
 )
 

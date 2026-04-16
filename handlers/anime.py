@@ -15,7 +15,7 @@ from database.db import (
     set_rating, get_anime_rating, get_user_rating,
     add_comment, get_comments, get_history, get_last_watched,
     add_history, increment_views, get_all_anime, get_most_viewed,
-    get_top_anime_local, log_action, get_all_admin_ids
+    get_top_anime_local, log_action, get_all_admin_ids, get_total_anime_count
 )
 from utils.keyboards import (
     anime_card_kb, episodes_kb, episode_watch_kb,
@@ -116,12 +116,19 @@ async def all_anime_cmd(msg: Message):
             "Admin tez orada qo'shadi! 🎌"
         )
         return
-    text = f"🎬 <b>Botdagi animalar</b> — {len(items)} ta\n\n"
+
+    total_count = await get_total_anime_count()
+    total_pages = max(1, (total_count + 20 - 1) // 20)
+
+    text = f"🎬 <b>Botdagi animalar</b> — {total_count} ta\n\n"
     for i, a in enumerate(items, 1):
         t = a.get("title_en") or a.get("title_jp") or "?"
         ep = a.get("total_ep", 0)
         text += f"{i}. <b>{t}</b> ({ep} ep)\n"
-    kb = local_anime_list_kb(items, 1, 3, "all_anime")
+
+    kb = local_anime_list_kb(items, 1, total_pages, "all_anime")
+
+    # Har bir sahifadagi birinchi animening rasmini ko'rsatamiz
     cover = items[0].get("cover_image","") if items else ""
     if cover:
         await msg.answer_photo(photo=cover, caption=text, parse_mode="HTML", reply_markup=kb)
@@ -134,16 +141,42 @@ async def all_anime_page(cb: CallbackQuery):
     await cb.answer()
     page = int(cb.data.split(":")[1])
     items = await get_all_anime(page=page, per_page=20)
-    text = f"🎬 <b>Botdagi animalar</b> — Sahifa {page}\n\n"
+
+    if not items:
+        await cb.answer("❌ Bu sahifada anime yo'q", show_alert=True)
+        return
+
+    total_count = await get_total_anime_count()
+    total_pages = max(1, (total_count + 20 - 1) // 20)
+
+    text = f"🎬 <b>Botdagi animalar</b> — {total_count} ta (Sahifa {page}/{total_pages})\n\n"
     for i, a in enumerate(items, (page-1)*20+1):
         t = a.get("title_en") or a.get("title_jp") or "?"
         ep = a.get("total_ep", 0)
         text += f"{i}. <b>{t}</b> ({ep} ep)\n"
-    kb = local_anime_list_kb(items, page, 3, "all_anime")
+
+    kb = local_anime_list_kb(items, page, total_pages, "all_anime")
+
+    # Har bir sahifadagi birinchi animening rasmini ko'rsatish
+    new_cover = items[0].get("cover_image","") if items else ""
+
     try:
-        await cb.message.edit_caption(caption=text, parse_mode="HTML", reply_markup=kb)
-    except Exception:
-        await cb.message.edit_text(text, parse_mode="HTML", reply_markup=kb)
+        # Agar rasm bor bo'lsa, xabarni o'chirib yangi rasm bilan yuboramiz
+        if new_cover:
+            await cb.message.delete()
+            await cb.message.answer_photo(photo=new_cover, caption=text, parse_mode="HTML", reply_markup=kb)
+        else:
+            # Rasm yo'q bo'lsa, faqat textni edit qilamiz
+            await cb.message.edit_caption(caption=text, parse_mode="HTML", reply_markup=kb)
+    except Exception as e:
+        # Agar xatolik bo'lsa, yangi xabar yuboramiz
+        try:
+            if new_cover:
+                await cb.message.answer_photo(photo=new_cover, caption=text, parse_mode="HTML", reply_markup=kb)
+            else:
+                await cb.message.answer(text, parse_mode="HTML", reply_markup=kb)
+        except Exception:
+            await cb.answer("❌ Xatolik yuz berdi", show_alert=True)
 
 
 # ═══════════════════════════════════════════════════════════════

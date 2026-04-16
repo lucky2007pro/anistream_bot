@@ -51,8 +51,29 @@ def subscribe_kb(subscribe_channel: str = "") -> InlineKeyboardMarkup:
 def anime_card_kb(anime_id: int, is_fav: bool, is_sub: bool,
                   ep_count: int = 0, user_rating: int = 0) -> InlineKeyboardMarkup:
     b = InlineKeyboardBuilder()
+
+    # Epizodlar tugmasi
     if ep_count > 0:
         b.row(InlineKeyboardButton(text=f"📺 Epizodlar ({ep_count} ta)", callback_data=f"eps:{anime_id}:1"))
+
+    # Sevimlilar va bildirishnoma tugmalari
+    fav_text = "💔 Sevimlidan o'chirish" if is_fav else "❤️ Sevimlilarga"
+    fav_action = "rm" if is_fav else "add"
+    sub_text = "🔕 Bildirishnomani o'chirish" if is_sub else "🔔 Bildirishnoma"
+    sub_action = "off" if is_sub else "on"
+
+    b.row(
+        InlineKeyboardButton(text=fav_text, callback_data=f"fav:{fav_action}:{anime_id}"),
+        InlineKeyboardButton(text=sub_text, callback_data=f"sub:{sub_action}:{anime_id}")
+    )
+
+    # Reyting va izohlar tugmalari
+    rating_text = f"⭐ Reyting ({user_rating}/10)" if user_rating else "⭐ Reyting berish"
+    b.row(
+        InlineKeyboardButton(text=rating_text, callback_data=f"rate:{anime_id}"),
+        InlineKeyboardButton(text="💬 Izohlar", callback_data=f"cmts:{anime_id}")
+    )
+
     return b.as_markup()
 
 
@@ -165,6 +186,7 @@ def favorites_kb(favs: list) -> InlineKeyboardMarkup:
 
 def comments_kb(comments: list, anime_id: int) -> InlineKeyboardMarkup:
     b = InlineKeyboardBuilder()
+    b.row(InlineKeyboardButton(text="✍️ Izoh yozish", callback_data=f"write_comment:{anime_id}"))
     b.row(InlineKeyboardButton(text="🔙 Animega qaytish", callback_data=f"local_anime:{anime_id}"))
     return b.as_markup()
 

@@ -17,6 +17,7 @@ from database.db import (
     is_admin as db_is_admin, is_root_admin,
     add_delegated_admin, remove_delegated_admin, list_delegated_admins,
     add_publish_channel, remove_publish_channel, get_publish_channels,
+    get_setting, set_setting,
 )
 from utils.keyboards import admin_kb, cancel_kb, admin_ep_list_kb
 
@@ -50,6 +51,10 @@ class AdminManageState(StatesGroup):
     waiting_remove = State()
 
 
+class SubscribeSettingState(StatesGroup):
+    waiting_channel = State()
+
+
 @router.message(F.text == "📊 Admin panel")
 async def admin_panel(msg: Message):
     if not await is_admin(msg.from_user.id):
@@ -65,6 +70,7 @@ async def admin_panel(msg: Message):
         InlineKeyboardButton(text="📤 Epizod yuklash", callback_data="admin_upload_ep"),
     )
     b.row(InlineKeyboardButton(text="📡 Kanallar", callback_data="admin_channels"))
+    b.row(InlineKeyboardButton(text="🔐 Majburiy obuna", callback_data="admin_subscribe_settings"))
     if is_root_admin(msg.from_user.id):
         b.row(InlineKeyboardButton(text="👥 Adminlar", callback_data="admin_manage_admins"))
 
@@ -651,3 +657,146 @@ async def del_anime(cb: CallbackQuery):
     anime_id = int(cb.data.split(":")[1])
     await delete_anime(anime_id)
     await cb.answer("✅ Anime o'chirildi")
+
+
+# ===================== Majburiy obuna sozlamalari =====================
+@router.callback_query(F.data == "admin_subscribe_settings")
+async def subscribe_settings_menu(cb: CallbackQuery):
+    if not await is_admin(cb.from_user.id):
+        await cb.answer("❌ Ruxsat yo'q", show_alert=True)
+        return
+
+    subscribe_channel = await get_setting("subscribe_channel", "")
+    subscribe_channel_id = await get_setting("subscribe_channel_id", "")
+
+    from aiogram.utils.keyboard import InlineKeyboardBuilder
+    from aiogram.types import InlineKeyboardButton
+
+    b = InlineKeyboardBuilder()
+    b.row(InlineKeyboardButton(text="✏️ Kanal o'rnatish", callback_data="set_subscribe_channel"))
+    b.row(InlineKeyboardButton(text="🗑 Obunani o'chirish", callback_data="clear_subscribe_channel"))
+
+    status = "✅ Yoqilgan" if subscribe_channel_id else "❌ O'chirilgan"
+    text = (
+        f"🔐 <b>Majburiy obuna sozlamalari</b>\n\n"
+        f"Status: {status}\n"
+        f"Kanal: {subscribe_channel or 'Belgilanmagan'}\n"
+        f"Kanal ID: <code>{subscribe_channel_id or 'Yo\'q'}</code>\n\n"
+        f"📌 Majburiy obuna yoqish uchun:\n"
+        f"1. <b>✏️ Kanal o'rnatish</b> tugmasini bosing\n"
+        f"2. Kanaldan biror xabar forward qiling yoki\n"
+        f"3. <code>@username|channel_id</code> formatida yuboring"
+    )
+
+    await cb.answer()
+    await cb.message.answer(text, parse_mode="HTML", reply_markup=b.as_markup())
+
+
+@router.callback_query(F.data == "set_subscribe_channel")
+async def set_subscribe_channel_start(cb: CallbackQuery, state: FSMContext):
+    if not await is_admin(cb.from_user.id):
+        await cb.answer("❌ Ruxsat yo'q", show_alert=True)
+        return
+
+    await state.set_state(SubscribeSettingState.waiting_channel)
+    await cb.answer()
+    await cb.message.answer(
+        "📢 <b>Majburiy obuna kanali o'rnatish</b>\n\n"
+        "1️⃣ Kanaldan biror xabar forward qiling\n"
+        "   (Bot avtomatik aniqlaydi)\n\n"
+        "2️⃣ Yoki qo'lda yozing:\n"
+        "   <code>@kanalUsername|-1001234567890</code>\n\n"
+        "Misol: <code>@anime_uz|-1001234567890</code>",
+        parse_mode="HTML",
+        reply_markup=cancel_kb(),
+    )
+
+
+@router.message(SubscribeSettingState.waiting_channel, F.forward_from_chat)
+async def set_subscribe_from_forward(msg: Message, state: FSMContext):
+    channel = msg.forward_from_chat
+    if channel.type not in ("channel", "supergroup"):
+        await msg.answer("❗ Faqat kanal yoki guruh forward qiling")
+        return
+
+    channel_id = str(channel.id)
+    channel_username = f"@{channel.username}" if channel.username else channel.title or "Kanal"
+
+    # Botning adminligini tekshirish
+    try:
+        member = await msg.bot.get_chat_member(channel.id, msg.bot.id)
+        if member.status not in ("administrator", "creator"):
+            await msg.answer("⚠️ Bot bu kanalda admin emas! Botni kanalga admin qilib qo'shing.")
+            return
+    except Exception as e:
+        await msg.answer(f"❌ Xato: {e}")
+        return
+
+    await set_setting("subscribe_channel", channel_username)
+    await set_setting("subscribe_channel_id", channel_id)
+    await state.clear()
+
+    await msg.answer(
+        f"✅ <b>Majburiy obuna yoqildi!</b>\n\n"
+        f"📢 Kanal: {channel_username}\n"
+        f"🆔 ID: <code>{channel_id}</code>\n\n"
+        f"Endi barcha foydalanuvchilar bu kanalga obuna bo'lishi shart.",
+        parse_mode="HTML",
+        reply_markup=admin_kb(),
+    )
+
+
+@router.message(SubscribeSettingState.waiting_channel, F.text)
+async def set_subscribe_manual(msg: Message, state: FSMContext):
+    if msg.text == "❌ Bekor qilish":
+        await state.clear()
+        await msg.answer("❌ Bekor qilindi", reply_markup=admin_kb())
+        return
+
+    raw = msg.text.strip()
+    if "|" not in raw:
+        await msg.answer("❗ Format: <code>@username|channel_id</code>", parse_mode="HTML")
+        return
+
+    channel_username, channel_id = raw.split("|", 1)
+    channel_username = channel_username.strip()
+    channel_id = channel_id.strip()
+
+    if not channel_username or not channel_id:
+        await msg.answer("❗ Ikkala qiymat ham kerak: username va ID")
+        return
+
+    # ID formatini tekshirish
+    if not (channel_id.lstrip("-").isdigit() or channel_id.startswith("@")):
+        await msg.answer("❗ Kanal ID raqam bo'lishi kerak, masalan: -1001234567890")
+        return
+
+    await set_setting("subscribe_channel", channel_username)
+    await set_setting("subscribe_channel_id", channel_id)
+    await state.clear()
+
+    await msg.answer(
+        f"✅ <b>Majburiy obuna yoqildi!</b>\n\n"
+        f"📢 Kanal: {channel_username}\n"
+        f"🆔 ID: <code>{channel_id}</code>\n\n"
+        f"⚠️ Agar bot kanalda admin bo'lmasa, uni admin qilib qo'shing!",
+        parse_mode="HTML",
+        reply_markup=admin_kb(),
+    )
+
+
+@router.callback_query(F.data == "clear_subscribe_channel")
+async def clear_subscribe_channel(cb: CallbackQuery):
+    if not await is_admin(cb.from_user.id):
+        await cb.answer("❌ Ruxsat yo'q", show_alert=True)
+        return
+
+    await set_setting("subscribe_channel", "")
+    await set_setting("subscribe_channel_id", "")
+
+    await cb.answer("✅ Majburiy obuna o'chirildi", show_alert=True)
+    await cb.message.answer(
+        "✅ <b>Majburiy obuna o'chirildi</b>\n\n"
+        "Endi foydalanuvchilar kanalga obuna bo'lmasdan ham botdan foydalanishlari mumkin.",
+        parse_mode="HTML",
+    )

@@ -304,6 +304,14 @@ async def get_all_anime(page=1, per_page=20) -> list:
     return [dict(r) for r in rows]
 
 
+async def get_total_anime_count() -> int:
+    """Jami aktiv animalar sonini qaytaradi"""
+    async with aiosqlite.connect(DB_PATH) as db:
+        cur = await db.execute("SELECT COUNT(*) FROM anime_list WHERE is_active=1")
+        count = (await cur.fetchone())[0]
+    return count
+
+
 async def update_anime_ep_count(anime_id: int):
     async with aiosqlite.connect(DB_PATH) as db:
         cur = await db.execute(
