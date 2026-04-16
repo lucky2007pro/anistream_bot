@@ -274,6 +274,12 @@ async def upload_select_anime(msg: Message, state: FSMContext):
     await state.update_data(anime_id=anime["id"])
 
     if (anime.get("status") or "").upper() == "MOVIE":
+        from database.db import get_episode
+        existing = await get_episode(anime["id"], 1)
+        if existing:
+            await msg.answer("❗ Bu film uchun video allaqachon yuklangan!\nBoshqa video yuklashdan avval eskisini o'chiring.", reply_markup=admin_kb())
+            await state.clear()
+            return
         await state.update_data(ep_number=1)
         await state.set_state(UploadEpState.upload_video)
         await msg.answer("🎬 Film uchun video yuboring:", reply_markup=cancel_kb())
@@ -294,6 +300,12 @@ async def sel_anime_ep(cb: CallbackQuery, state: FSMContext):
 
     await state.update_data(anime_id=anime_id)
     if (anime or {}).get("status", "").upper() == "MOVIE":
+        from database.db import get_episode
+        existing = await get_episode(anime_id, 1)
+        if existing:
+            await cb.message.answer("❗ Bu film uchun video allaqachon yuklangan!\nEskisini o'chirmaguncha yangisini yuklolmaysiz.", reply_markup=admin_kb())
+            await state.clear()
+            return
         await state.update_data(ep_number=1)
         await state.set_state(UploadEpState.upload_video)
         await cb.message.answer("🎬 Film uchun video yuboring:", reply_markup=cancel_kb())
@@ -313,7 +325,17 @@ async def upload_ep_number(msg: Message, state: FSMContext):
         await msg.answer("❗ Raqam kiriting")
         return
 
-    await state.update_data(ep_number=int(msg.text))
+    ep_num = int(msg.text)
+    data = await state.get_data()
+    anime_id = data.get("anime_id")
+
+    from database.db import get_episode
+    existing = await get_episode(anime_id, ep_num)
+    if existing:
+        await msg.answer(f"❗ Bu animeda {ep_num}-qism allaqachon mavjud!\nBoshqa raqam kiriting yoki avval eski qismni o'chiring.", reply_markup=cancel_kb())
+        return
+
+    await state.update_data(ep_number=ep_num)
     await state.set_state(UploadEpState.upload_video)
     await msg.answer("📤 Video yuboring:", reply_markup=cancel_kb())
 
@@ -370,12 +392,10 @@ async def receive_video(msg: Message, state: FSMContext):
             reply_markup=admin_kb(),
         )
 
-    # Ulangan kanallarga rasm yuborish
+    # Ulangan kanallarga xabar yuborish
     channels = await get_publish_channels()
     if not channels:
         await msg.answer("ℹ️ Ulangan kanal yo'q. '📡 Kanallar' orqali qo'shing.")
-    elif not cover:
-        await msg.answer("⚠️ Anime rasmi yo'q, kanallarga e'lon yuborilmadi.")
     else:
         me = await msg.bot.get_me()
         deep_link = f"https://t.me/{me.username}?start=anime_{anime_id}"
@@ -397,16 +417,27 @@ async def receive_video(msg: Message, state: FSMContext):
         sent_ok, sent_fail = 0, 0
         for ch in channels:
             try:
-                channel_id = ch["channel_id"]
-                await msg.bot.send_photo(
-                    chat_id=channel_id,
-                    photo=cover,
-                    caption=caption,
-                    parse_mode="HTML",
-                    reply_markup=b.as_markup()
-                )
+                ch_raw = str(ch["channel_id"]).strip()
+                ch_id = int(ch_raw) if ch_raw.lstrip("-").isdigit() else ch_raw
+                if cover:
+                    await msg.bot.send_photo(
+                        chat_id=ch_id,
+                        photo=cover,
+                        caption=caption,
+                        parse_mode="HTML",
+                        reply_markup=b.as_markup()
+                    )
+                else:
+                    await msg.bot.send_message(
+                        chat_id=ch_id,
+                        text=caption,
+                        parse_mode="HTML",
+                        reply_markup=b.as_markup()
+                    )
                 sent_ok += 1
-            except Exception:
+            except Exception as e:
+                import logging
+                logging.error(f"Kanalga yuborishda xato ({ch['channel_id']}): {e}")
                 sent_fail += 1
 
         await msg.answer(f"📡 Kanallarga yuborildi: ✅ {sent_ok} | ❌ {sent_fail}")
