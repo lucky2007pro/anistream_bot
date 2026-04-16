@@ -350,10 +350,12 @@ async def receive_video(msg: Message, state: FSMContext):
             reply_markup=admin_kb(),
         )
 
-    # Ulangan kanallarga video yuborish
+    # Ulangan kanallarga rasm yuborish
     channels = await get_publish_channels()
     if not channels:
         await msg.answer("ℹ️ Ulangan kanal yo'q. '📡 Kanallar' orqali qo'shing.")
+    elif not cover:
+        await msg.answer("⚠️ Anime rasmi yo'q, kanallarga e'lon yuborilmadi.")
     else:
         me = await msg.bot.get_me()
         deep_link = f"https://t.me/{me.username}?start=anime_{anime_id}"
@@ -366,22 +368,22 @@ async def receive_video(msg: Message, state: FSMContext):
 
         caption = (
             f"🎌 <b>{title}</b>\n"
-            f"📺 <b>{ep_number}-qism</b>\n\n"
+            f"📺 <b>{ep_number}-qism yuklandi</b>\n\n"
             f"🎭 Janr: {genres}\n"
-            f"📁 Turi: {kind}\n"
+            f"📁 Turi: {kind}\n\n"
+            "👇 Botda tomosha qilish uchun tugmani bosing"
         )
 
         sent_ok, sent_fail = 0, 0
         for ch in channels:
             try:
                 channel_id = ch["channel_id"]
-                await msg.bot.send_video(
+                await msg.bot.send_photo(
                     chat_id=channel_id,
-                    video=video.file_id,
+                    photo=cover,
                     caption=caption,
                     parse_mode="HTML",
-                    reply_markup=b.as_markup(),
-                    supports_streaming=True
+                    reply_markup=b.as_markup()
                 )
                 sent_ok += 1
             except Exception:

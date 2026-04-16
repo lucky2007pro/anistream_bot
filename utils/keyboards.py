@@ -53,7 +53,6 @@ def anime_card_kb(anime_id: int, is_fav: bool, is_sub: bool,
     b = InlineKeyboardBuilder()
     if ep_count > 0:
         b.row(InlineKeyboardButton(text=f"📺 Epizodlar ({ep_count} ta)", callback_data=f"eps:{anime_id}:1"))
-    b.row(InlineKeyboardButton(text="📺 Epizodlar ro'yxati", callback_data=f"eps:{anime_id}:1"))
     return b.as_markup()
 
 
