@@ -161,15 +161,22 @@ async def all_anime_page(cb: CallbackQuery):
     new_cover = items[0].get("cover_image","") if items else ""
 
     try:
-        # Agar rasm bor bo'lsa, xabarni o'chirib yangi rasm bilan yuboramiz
-        if new_cover:
-            await cb.message.delete()
-            await cb.message.answer_photo(photo=new_cover, caption=text, parse_mode="HTML", reply_markup=kb)
-        else:
-            # Rasm yo'q bo'lsa, faqat textni edit qilamiz
+        # Rasmni edit qilishga harakat qilamiz
+        if new_cover and cb.message.photo:
+            # Agar oldingi xabarda ham rasm bo'lsa, faqat caption va rasmni edit qilamiz
+            from aiogram.types import InputMediaPhoto
+            await cb.message.edit_media(
+                media=InputMediaPhoto(media=new_cover, caption=text, parse_mode="HTML"),
+                reply_markup=kb
+            )
+        elif cb.message.photo:
+            # Rasm bor lekin yangi rasm yo'q - faqat caption edit
             await cb.message.edit_caption(caption=text, parse_mode="HTML", reply_markup=kb)
+        else:
+            # Oldingi xabarda rasm yo'q edi
+            await cb.message.edit_text(text, parse_mode="HTML", reply_markup=kb)
     except Exception as e:
-        # Agar xatolik bo'lsa, yangi xabar yuboramiz
+        # Agar edit ishlamasa, yangi xabar yuboramiz
         try:
             if new_cover:
                 await cb.message.answer_photo(photo=new_cover, caption=text, parse_mode="HTML", reply_markup=kb)
