@@ -6,7 +6,8 @@ Soddalashtirilgan admin panel:
 - Root admin: delegat admin qo'shish/o'chirish
 """
 from aiogram import Router, F
-from aiogram.types import Message, CallbackQuery, Video
+from aiogram.types import Message, CallbackQuery
+import html
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 
@@ -20,6 +21,7 @@ from database.db import (
     get_publish_channel, update_publish_channel,
     get_all_anime, get_total_anime_count,
     update_anime_fields, set_anime_active,
+    approve_comment, get_pending_comments,
 )
 from utils.keyboards import admin_kb, cancel_kb, admin_ep_list_kb
 
@@ -55,95 +57,12 @@ class AdminManageState(StatesGroup):
     waiting_remove = State()
 
 
-class SubscribeSettingState(StatesGroup):
-    waiting_channel = State()
-
-
 class EditAnimeState(StatesGroup):
     title = State()
     genres = State()
     status = State()
     cover = State()
 
-
-@router.message(F.text == "📊 Admin panel")
-async def admin_panel(msg: Message):
-    if not await is_admin(msg.from_user.id):
-        return
-
-    s = await get_stats()
-    from aiogram.utils.keyboard import InlineKeyboardBuilder
-    from aiogram.types import InlineKeyboardButton
-
-    b = InlineKeyboardBuilder()
-    b.row(
-        InlineKeyboardButton(text="➕ Anime qo'shish", callback_data="admin_add_anime"),
-        InlineKeyboardButton(text="📤 Epizod yuklash", callback_data="admin_upload_ep"),
-    )
-    b.row(
-        InlineKeyboardButton(text="📋 Anime ro'yxati", callback_data="admin_anime_list"),
-        InlineKeyboardButton(text="📡 Kanallar", callback_data="admin_channels")
-    )
-    b.row(InlineKeyboardButton(text="🔐 Majburiy obuna", callback_data="admin_subscribe_settings"))
-    if is_root_admin(msg.from_user.id):
-        b.row(InlineKeyboardButton(text="👥 Adminlar", callback_data="admin_manage_admins"))
-
-    text = (
-        "📊 <b>Admin Panel</b>\n\n"
-        f"👥 Foydalanuvchi: <b>{s['total_users']}</b>\n"
-        f"🎌 Anime: <b>{s['total_anime']}</b>\n"
-        f"📺 Epizod: <b>{s['total_episodes']}</b>\n"
-        f"👁 Ko'rishlar: <b>{s['total_views']}</b>"
-    )
-    await msg.answer(text, parse_mode="HTML", reply_markup=b.as_markup())
-
-
-# ===================== Anime qo'shish =====================
-@router.message(F.text == "➕ Anime qo'shish")
-@router.callback_query(F.data == "admin_add_anime")
-async def add_anime_start(event, state: FSMContext):
-    if not await is_admin(event.from_user.id):
-        return
-
-    await state.set_state(AddAnimeState.title)
-    text = "Anime nomini yuboring:"
-    if isinstance(event, Message):
-        await event.answer(text, reply_markup=cancel_kb())
-    else:
-        await event.answer()
-        await event.message.answer(text, reply_markup=cancel_kb())
-
-
-@router.message(AddAnimeState.title, F.text)
-async def add_anime_title(msg: Message, state: FSMContext):
-    if msg.text == "❌ Bekor qilish":
-        await state.clear()
-        await msg.answer("❌ Bekor", reply_markup=admin_kb())
-        return
-
-    await state.update_data(title=msg.text.strip())
-    await state.set_state(AddAnimeState.genres)
-    await msg.answer("Janrlarni yozing (vergul bilan):\nMisol: Romantika, Komediya")
-
-
-@router.message(AddAnimeState.genres, F.text)
-async def add_anime_genres(msg: Message, state: FSMContext):
-    if msg.text == "❌ Bekor qilish":
-        await state.clear()
-        await msg.answer("❌ Bekor", reply_markup=admin_kb())
-        return
-
-    await state.update_data(genres=msg.text.strip())
-    await state.set_state(AddAnimeState.kind)
-
-    from aiogram.utils.keyboard import InlineKeyboardBuilder
-    from aiogram.types import InlineKeyboardButton
-    b = InlineKeyboardBuilder()
-    b.row(
-        InlineKeyboardButton(text="🎬 Film", callback_data="anime_kind:MOVIE"),
-        InlineKeyboardButton(text="📺 Serial", callback_data="anime_kind:SERIAL"),
-    )
-    await msg.answer("Anime turini tanlang:", reply_markup=b.as_markup())
 
 
 @router.callback_query(F.data.regexp(r"^anime_kind:(MOVIE|SERIAL)$"))
@@ -340,7 +259,7 @@ async def upload_ep_number(msg: Message, state: FSMContext):
     await msg.answer("📤 Video yuboring:", reply_markup=cancel_kb())
 
 
-@router.message(UploadEpState.upload_video, F.video)
+@router.message(UploadEpState.upload_video, F.video | F.document)
 async def receive_video(msg: Message, state: FSMContext):
     data = await state.get_data()
     await state.clear()
@@ -352,22 +271,34 @@ async def receive_video(msg: Message, state: FSMContext):
         await msg.answer("❌ Anime topilmadi", reply_markup=admin_kb())
         return
 
-    video: Video = msg.video
+    # Accept both video and document
+    if msg.video:
+        file_id = msg.video.file_id
+        file_unique_id = msg.video.file_unique_id
+        duration = msg.video.duration or 0
+    elif msg.document:
+        file_id = msg.document.file_id
+        file_unique_id = msg.document.file_unique_id
+        duration = 0
+    else:
+        await msg.answer("❗ Faqat video yoki document yuboring.", reply_markup=admin_kb())
+        return
+
     await add_episode({
         "anime_id": anime_id,
         "ep_number": ep_number,
         "title": f"{ep_number}-qism",
-        "file_id": video.file_id,
-        "file_unique_id": video.file_unique_id,
+        "file_id": file_id,
+        "file_unique_id": file_unique_id,
         "message_id": 0,
-        "duration": video.duration or 0,
+        "duration": duration,
         "quality": "default",
         "subtitles": "none",
         "added_by": msg.from_user.id,
     })
 
-    title = anime.get("title_en") or "Anime"
-    genres = anime.get("genres") or "-"
+    title = html.escape(anime.get("title_en") or "Anime")
+    genres = html.escape(anime.get("genres") or "-")
     kind = (anime.get("status") or "SERIAL").upper()
     cover = anime.get("cover_image") or ""
 
@@ -990,7 +921,13 @@ async def edit_anime_title_finish(msg: Message, state: FSMContext):
     anime_id = int(data.get("anime_id"))
     await update_anime_fields(anime_id, title_en=msg.text.strip())
     await state.clear()
+
+    from aiogram.utils.keyboard import InlineKeyboardBuilder
+    from aiogram.types import InlineKeyboardButton
+    b = InlineKeyboardBuilder()
+    b.row(InlineKeyboardButton(text="🔙 Anime panelga qaytish", callback_data=f"admin_anime_detail:{anime_id}"))
     await msg.answer("✅ Nom yangilandi", reply_markup=admin_kb())
+    await msg.answer("👇 Anime panelga qaytish:", reply_markup=b.as_markup())
 
 
 @router.callback_query(F.data.regexp(r"^edit_anime_genres:\d+$"))
@@ -1014,7 +951,13 @@ async def edit_anime_genres_finish(msg: Message, state: FSMContext):
     anime_id = int(data.get("anime_id"))
     await update_anime_fields(anime_id, genres=msg.text.strip())
     await state.clear()
+
+    from aiogram.utils.keyboard import InlineKeyboardBuilder
+    from aiogram.types import InlineKeyboardButton
+    b = InlineKeyboardBuilder()
+    b.row(InlineKeyboardButton(text="🔙 Anime panelga qaytish", callback_data=f"admin_anime_detail:{anime_id}"))
     await msg.answer("✅ Janr yangilandi", reply_markup=admin_kb())
+    await msg.answer("👇 Anime panelga qaytish:", reply_markup=b.as_markup())
 
 
 @router.callback_query(F.data.regexp(r"^edit_anime_status:\d+$"))
@@ -1044,7 +987,13 @@ async def edit_anime_status_finish(msg: Message, state: FSMContext):
     anime_id = int(data.get("anime_id"))
     await update_anime_fields(anime_id, status=status)
     await state.clear()
+
+    from aiogram.utils.keyboard import InlineKeyboardBuilder
+    from aiogram.types import InlineKeyboardButton
+    b = InlineKeyboardBuilder()
+    b.row(InlineKeyboardButton(text="🔙 Anime panelga qaytish", callback_data=f"admin_anime_detail:{anime_id}"))
     await msg.answer("✅ Tur yangilandi", reply_markup=admin_kb())
+    await msg.answer("👇 Anime panelga qaytish:", reply_markup=b.as_markup())
 
 
 @router.callback_query(F.data.regexp(r"^edit_anime_cover:\d+$"))
@@ -1064,7 +1013,13 @@ async def edit_anime_cover_finish(msg: Message, state: FSMContext):
     anime_id = int(data.get("anime_id"))
     await update_anime_fields(anime_id, cover_image=msg.photo[-1].file_id)
     await state.clear()
+
+    from aiogram.utils.keyboard import InlineKeyboardBuilder
+    from aiogram.types import InlineKeyboardButton
+    b = InlineKeyboardBuilder()
+    b.row(InlineKeyboardButton(text="🔙 Anime panelga qaytish", callback_data=f"admin_anime_detail:{anime_id}"))
     await msg.answer("✅ Rasm yangilandi", reply_markup=admin_kb())
+    await msg.answer("👇 Anime panelga qaytish:", reply_markup=b.as_markup())
 
 
 @router.message(EditAnimeState.cover, F.text)
@@ -1084,3 +1039,142 @@ async def subscribe_settings_menu(cb: CallbackQuery):
         return
 
     await channels_panel(cb)
+
+
+# ===================== Anime qo'shish (start) =====================
+@router.message(F.text == "➕ Anime qo'shish")
+async def add_anime_start(msg: Message, state: FSMContext):
+    if not await is_admin(msg.from_user.id):
+        return
+
+    await state.set_state(AddAnimeState.title)
+    await msg.answer("🌟 Anime nomini yozing (inglizcha):", reply_markup=cancel_kb())
+
+
+@router.message(AddAnimeState.title, F.text)
+async def add_anime_title(msg: Message, state: FSMContext):
+    if msg.text == "❌ Bekor qilish":
+        await state.clear()
+        await msg.answer("❌ Bekor", reply_markup=admin_kb())
+        return
+
+    await state.update_data(title=msg.text.strip())
+    await state.set_state(AddAnimeState.genres)
+    await msg.answer("🎭 Janr yozing (vergul bilan):\nMisol: Action, Adventure, Fantasy")
+
+
+@router.message(AddAnimeState.genres, F.text)
+async def add_anime_genres(msg: Message, state: FSMContext):
+    if msg.text == "❌ Bekor qilish":
+        await state.clear()
+        await msg.answer("❌ Bekor", reply_markup=admin_kb())
+        return
+
+    await state.update_data(genres=msg.text.strip())
+
+    from aiogram.utils.keyboard import InlineKeyboardBuilder
+    from aiogram.types import InlineKeyboardButton
+
+    b = InlineKeyboardBuilder()
+    b.row(
+        InlineKeyboardButton(text="🎥 Film (MOVIE)", callback_data="anime_kind:MOVIE"),
+        InlineKeyboardButton(text="📺 Serial", callback_data="anime_kind:SERIAL"),
+    )
+    await msg.answer("📁 Turini tanlang:", reply_markup=b.as_markup())
+
+
+# ===================== Admin panel (statistika) =====================
+@router.message(F.text == "📊 Admin panel")
+async def admin_panel(msg: Message):
+    if not await is_admin(msg.from_user.id):
+        return
+
+    stats = await get_stats()
+
+    text = (
+        "📊 <b>Admin panel</b>\n\n"
+        f"👥 Foydalanuvchilar: <b>{stats['total_users']}</b>\n"
+        f"📅 Bugungi faollar: <b>{stats['today_users']}</b>\n"
+        f"🌟 Animalar: <b>{stats['total_anime']}</b>\n"
+        f"📺 Epizodlar: <b>{stats['total_episodes']}</b>\n"
+        f"👁 Ko'rishlar: <b>{stats['total_views']}</b>\n"
+        f"❤️ Sevimlilar: <b>{stats['total_favorites']}</b>\n"
+        f"⭐ Reytinglar: <b>{stats['total_ratings']}</b>\n"
+        f"💬 Izohlar: <b>{stats['total_comments']}</b>\n"
+    )
+
+    from aiogram.utils.keyboard import InlineKeyboardBuilder
+    from aiogram.types import InlineKeyboardButton
+
+    b = InlineKeyboardBuilder()
+    b.row(InlineKeyboardButton(text="📋 Anime ro'yxati", callback_data="admin_anime_list"))
+    b.row(InlineKeyboardButton(text="📤 Epizod yuklash", callback_data="admin_upload_ep"))
+    b.row(InlineKeyboardButton(text="📡 Kanallar", callback_data="admin_channels"))
+    b.row(InlineKeyboardButton(text="💬 Tasdiqlanmagan izohlar", callback_data="admin_pending_comments"))
+    if is_root_admin(msg.from_user.id):
+        b.row(InlineKeyboardButton(text="👑 Admin boshqaruvi", callback_data="admin_manage_admins"))
+
+    await msg.answer(text, parse_mode="HTML", reply_markup=b.as_markup())
+
+
+# ===================== Izoh tasdiqlash / o'chirish =====================
+@router.callback_query(F.data == "admin_pending_comments")
+async def admin_pending_comments_list(cb: CallbackQuery):
+    if not await is_admin(cb.from_user.id):
+        await cb.answer("❌ Ruxsat yo'q", show_alert=True)
+        return
+
+    comments = await get_pending_comments()
+    await cb.answer()
+
+    if not comments:
+        await cb.message.answer("✅ Tasdiqlanmagan izoh yo'q")
+        return
+
+    from utils.keyboards import admin_comment_kb
+    for c in comments[:10]:
+        name = c.get("first_name") or "Anonim"
+        title = c.get("title_en") or "Anime"
+        text = (
+            f"💬 <b>Izoh tasdiqlash</b>\n\n"
+            f"🌟 Anime: {html.escape(title)}\n"
+            f"👤 {html.escape(name)}\n\n"
+            f"📝 {html.escape(c['text'][:300])}"
+        )
+        await cb.message.answer(text, parse_mode="HTML", reply_markup=admin_comment_kb(c["id"]))
+
+
+@router.callback_query(F.data.regexp(r"^approve_comment:\d+$"))
+async def approve_comment_handler(cb: CallbackQuery):
+    if not await is_admin(cb.from_user.id):
+        await cb.answer("❌ Ruxsat yo'q", show_alert=True)
+        return
+
+    comment_id = int(cb.data.split(":")[1])
+    await approve_comment(comment_id)
+    await cb.answer("✅ Izoh tasdiqlandi", show_alert=True)
+    try:
+        await cb.message.delete()
+    except Exception:
+        pass
+
+
+@router.callback_query(F.data.regexp(r"^delete_comment:\d+$"))
+async def delete_comment_handler(cb: CallbackQuery):
+    if not await is_admin(cb.from_user.id):
+        await cb.answer("❌ Ruxsat yo'q", show_alert=True)
+        return
+
+    comment_id = int(cb.data.split(":")[1])
+    # Bazadan o'chiramiz
+    import aiosqlite
+    from config import DATABASE_PATH
+    async with aiosqlite.connect(DATABASE_PATH) as db:
+        await db.execute("DELETE FROM comments WHERE id=?", (comment_id,))
+        await db.commit()
+
+    await cb.answer("🗑 Izoh o'chirildi", show_alert=True)
+    try:
+        await cb.message.delete()
+    except Exception:
+        pass

@@ -1,13 +1,12 @@
 """
 Anime ko'rish, epizodlar, reyting, izoh, sevimlilar, bildirishnoma
 """
+import html as html_mod
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-
-from api.anilist import get_details, format_card, get_title
 from database.db import (
     get_anime_by_id, get_anime_by_anilist, get_episodes, get_episode,
     add_favorite, remove_favorite, is_favorite, get_favorites,
@@ -51,8 +50,8 @@ async def show_local_anime(target, anime_id: int, user_id: int):
     avg_rating, votes = await get_anime_rating(anime_id)
     last_watched = await get_last_watched(user_id, anime_id)
 
-    title = anime.get("title_en") or anime.get("title_jp") or "?"
-    genres = anime.get("genres","") or "N/A"
+    title = html_mod.escape(anime.get("title_en") or anime.get("title_jp") or "?")
+    genres = html_mod.escape(anime.get("genres","") or "N/A")
     status_map = {"FINISHED":"✅ Tugagan","RELEASING":"🔄 Chiqmoqda","CANCELLED":"❌ Bekor"}
     status = status_map.get(anime.get("status",""), anime.get("status",""))
 
@@ -233,8 +232,8 @@ async def send_episode(cb: CallbackQuery):
         )
         return
 
-    title = (anime.get("title_en") or anime.get("title_jp") or "Anime") if anime else "Anime"
-    ep_title = episode.get("title","") or f"{ep_num}-epizod"
+    title = html_mod.escape((anime.get("title_en") or anime.get("title_jp") or "Anime") if anime else "Anime")
+    ep_title = html_mod.escape(episode.get("title","") or f"{ep_num}-epizod")
     quality = episode.get("quality","")
     subs = episode.get("subtitles","none")
     subs_str = "✅ O'zbekcha" if "uz" in subs else "🇷🇺 Ruscha" if "ru" in subs else "🇬🇧 Inglizcha" if "en" in subs else "❌ Yo'q"
@@ -257,12 +256,20 @@ async def send_episode(cb: CallbackQuery):
             reply_markup=kb,
             supports_streaming=True,
         )
-    except Exception as e:
-        # Agar video o'chib ketgan bo'lsa
-        await cb.message.answer(
-            f"❌ Video yuborishda xato: {e}\n\nAdmin bilan bog'laning."
-        )
-        return
+    except Exception:
+        # Agar video sifatida yuborilmasa, document sifatida yuboramiz
+        try:
+            await cb.message.answer_document(
+                document=episode["file_id"],
+                caption=caption,
+                parse_mode="HTML",
+                reply_markup=kb,
+            )
+        except Exception as e2:
+            await cb.message.answer(
+                f"❌ Video yuborishda xato: {e2}\n\nAdmin bilan bog'laning."
+            )
+            return
 
     await increment_views(episode["id"])
     await add_history(cb.from_user.id, anime_id, ep_num)

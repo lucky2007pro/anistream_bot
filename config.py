@@ -39,9 +39,9 @@ LOG_FILE: str = os.getenv("LOG_FILE", str(BASE_DIR / "bot.log"))
 # AniList API (bepul, key shart emas)
 ANILIST_API = os.getenv("ANILIST_API", "https://graphql.anilist.co")
 
-# Consumet API (agar ishlatilsa)
-CONSUMET_API = os.getenv("CONSUMET_API", "https://api.consumet.org")
-CONSUMET_BACKUP = os.getenv("CONSUMET_BACKUP", "https://consumet-api-three.vercel.app")
+# Consumet API (hozircha ishlatilmaydi, kerak bo'lsa qaytarish mumkin)
+# CONSUMET_API = os.getenv("CONSUMET_API", "https://api.consumet.org")
+# CONSUMET_BACKUP = os.getenv("CONSUMET_BACKUP", "https://consumet-api-three.vercel.app")
 
 # Sahifalar
 RESULTS_PER_PAGE = int(os.getenv("RESULTS_PER_PAGE", "5"))

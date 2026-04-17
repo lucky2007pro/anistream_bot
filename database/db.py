@@ -373,6 +373,14 @@ async def delete_anime(anime_id: int):
 
 # ═══════════════════════════════════════════════════════════════
 #  EPISODES
+async def update_anime_ep_count(anime_id: int):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("""
+            UPDATE anime_list 
+            SET total_ep = (SELECT COUNT(*) FROM episodes WHERE anime_id=?)
+            WHERE id=?
+        """, (anime_id, anime_id))
+        await db.commit()
 # ═══════════════════════════════════════════════════════════════
 async def add_episode(data: dict) -> int:
     async with aiosqlite.connect(DB_PATH) as db:

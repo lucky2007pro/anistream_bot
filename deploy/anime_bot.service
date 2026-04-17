@@ -1,0 +1,15 @@
+[Unit]
+Description=Anime Bot (Aiogram 3.x)
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/anime_bot_aiogram
+ExecStart=/root/anime_bot_aiogram/.venv/bin/python bot.py
+Restart=always
+RestartSec=5
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target

@@ -7,7 +7,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 
 from database.db import search_local_anime, log_action
-from utils.keyboards import local_anime_list_kb, get_main_kb, cancel_kb
+from utils.keyboards import search_results_kb, get_main_kb, cancel_kb
 
 router = Router()
 
@@ -56,7 +56,7 @@ async def _do_local_search(msg: Message, query: str):
         ep = a.get("total_ep", 0)
         text += f"{i}. <b>{t}</b> | ID: <code>{a['id']}</code> | {ep} ep\n"
 
-    kb = local_anime_list_kb(items[:10], 1, 1, "all_anime")
+    kb = search_results_kb(items[:10], 1, 1, query)
     cover = items[0].get("cover_image", "")
 
     if cover:
