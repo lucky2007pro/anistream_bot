@@ -265,12 +265,16 @@ async def add_anime(data: dict) -> int:
             data.get("score",0), data.get("added_by",0)
         ))
         await db.commit()
+        await db.commit()
         # ID ni olish
-        cur2 = await db.execute(
-            "SELECT id FROM anime_list WHERE anilist_id=?", (data.get("anilist_id"),)
-        )
-        row = await cur2.fetchone()
-    return row[0] if row else 0
+        if data.get("anilist_id"):
+            cur2 = await db.execute(
+                "SELECT id FROM anime_list WHERE anilist_id=?", (data.get("anilist_id"),)
+            )
+            row = await cur2.fetchone()
+            if row:
+                return row[0]
+        return cur.lastrowid
 
 
 async def get_anime_by_id(anime_id: int) -> dict | None:

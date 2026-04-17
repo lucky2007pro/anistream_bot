@@ -13,7 +13,7 @@ from aiogram.fsm.state import State, StatesGroup
 
 from database.db import (
     add_anime, get_anime_by_id, delete_anime,
-    add_episode, get_episodes, delete_episode,
+    add_episode, get_episodes, get_episode, delete_episode,
     get_stats, log_action, search_local_anime,
     is_admin as db_is_admin, is_root_admin,
     add_delegated_admin, remove_delegated_admin, list_delegated_admins,
@@ -143,21 +143,94 @@ async def add_anime_skip_cover(msg: Message, state: FSMContext):
         reply_markup=admin_kb(),
     )
 
-
 # ===================== Epizod yuklash =====================
+async def show_anime_episodes_for_upload(msg_obj, anime, state: FSMContext, edit=False):
+    anime_id = anime["id"]
+    await state.update_data(anime_id=anime_id)
+    
+    eps = await get_episodes(anime_id)
+    ep_list = ", ".join([str(e["ep_number"]) for e in eps]) if eps else "Yo'q"
+    
+    title = anime.get("title_en") or anime.get("title_jp") or "?"
+    text = (
+        f"🎌 <b>{title}</b> (ID: {anime_id})\n"
+        f"📁 Status: {anime.get('status', 'SERIAL')}\n"
+        f"📺 Mavjud epizodlar: {ep_list}\n\n"
+        "👇 Qanday amal bajaramiz?"
+    )
+    
+    from aiogram.utils.keyboard import InlineKeyboardBuilder
+    from aiogram.types import InlineKeyboardButton
+    b = InlineKeyboardBuilder()
+    
+    if (anime.get("status") or "").upper() == "MOVIE":
+        b.row(InlineKeyboardButton(text="🎬 Filmni yuklash", callback_data=f"up_movie:{anime_id}"))
+    else:
+        b.row(InlineKeyboardButton(text="➕ Yangi qism yuklash", callback_data=f"up_ep:{anime_id}"))
+        
+    b.row(InlineKeyboardButton(text="🔙 Orqaga", callback_data="admin_upload_ep"))
+    
+    if edit:
+        try:
+            await msg_obj.edit_text(text, parse_mode="HTML", reply_markup=b.as_markup())
+        except:
+            await msg_obj.answer(text, parse_mode="HTML", reply_markup=b.as_markup())
+    else:
+        await msg_obj.answer(text, parse_mode="HTML", reply_markup=b.as_markup())
+
+
 @router.message(F.text == "📤 Epizod yuklash")
-@router.callback_query(F.data == "admin_upload_ep")
+@router.callback_query(F.data.regexp(r"^admin_upload_ep(?::\d+)?$"))
 async def upload_ep_start(event, state: FSMContext):
     if not await is_admin(event.from_user.id):
+        if isinstance(event, CallbackQuery):
+            await event.answer("❌ Ruxsat yo'q", show_alert=True)
         return
 
-    await state.set_state(UploadEpState.select_anime)
-    text = "Anime ID yoki nomini yozing:"
-    if isinstance(event, Message):
-        await event.answer(text, reply_markup=cancel_kb())
-    else:
+    page = 1
+    if isinstance(event, CallbackQuery):
+        parts = event.data.split(":")
+        if len(parts) > 1:
+            page = int(parts[1])
         await event.answer()
-        await event.message.answer(text, reply_markup=cancel_kb())
+
+    items = await get_all_anime(page=page, per_page=10, include_inactive=True)
+    total = await get_total_anime_count(include_inactive=True)
+    total_pages = max(1, (total + 10 - 1) // 10)
+
+    from aiogram.utils.keyboard import InlineKeyboardBuilder
+    from aiogram.types import InlineKeyboardButton
+    b = InlineKeyboardBuilder()
+    
+    for a in items:
+        t = a.get("title_en") or a.get("title_jp") or "?"
+        t = (t[:35] + "...") if len(t) > 35 else t
+        b.row(InlineKeyboardButton(text=f"📺 {t}", callback_data=f"ep_sel_anime:{a['id']}"))
+
+    nav = []
+    if page > 1:
+        nav.append(InlineKeyboardButton(text="⬅️ Oldingi", callback_data=f"admin_upload_ep:{page-1}"))
+    nav.append(InlineKeyboardButton(text=f"📄 {page}/{total_pages}", callback_data="noop"))
+    if page < total_pages:
+        nav.append(InlineKeyboardButton(text="Keyingi ➡️", callback_data=f"admin_upload_ep:{page+1}"))
+    if nav:
+        b.row(*nav)
+
+    text = (
+        "📤 <b>Epizod yuklash</b>\n\n"
+        "Quyidagi ro'yxatdan animeni tanlang yoki izlash uchun "
+        "uning <b>ID raqamini</b> yoxud <b>nomini</b> tepadagi menyudan kriting:"
+    )
+    
+    await state.set_state(UploadEpState.select_anime)
+    
+    if isinstance(event, Message):
+        await event.answer(text, parse_mode="HTML", reply_markup=b.as_markup())
+    else:
+        try:
+            await event.message.edit_text(text, parse_mode="HTML", reply_markup=b.as_markup())
+        except:
+            await event.message.answer(text, parse_mode="HTML", reply_markup=b.as_markup())
 
 
 @router.message(UploadEpState.select_anime, F.text)
@@ -172,65 +245,68 @@ async def upload_select_anime(msg: Message, state: FSMContext):
 
     if query.isdigit():
         anime = await get_anime_by_id(int(query))
+        if anime:
+            return await show_anime_episodes_for_upload(msg, anime, state)
     else:
         results = await search_local_anime(query)
         if len(results) == 1:
-            anime = results[0]
+            return await show_anime_episodes_for_upload(msg, results[0], state)
         elif len(results) > 1:
             from aiogram.utils.keyboard import InlineKeyboardBuilder
             from aiogram.types import InlineKeyboardButton
             b = InlineKeyboardBuilder()
             for a in results[:8]:
                 t = a.get("title_en") or "?"
-                b.row(InlineKeyboardButton(text=f"{t} (ID:{a['id']})", callback_data=f"sel_anime_ep:{a['id']}"))
-            await msg.answer("Qaysi anime?", reply_markup=b.as_markup())
+                b.row(InlineKeyboardButton(text=f"{t} (ID:{a['id']})", callback_data=f"ep_sel_anime:{a['id']}"))
+            await msg.answer("🔍 Bir nechta anime topildi. Qaysi biri?", reply_markup=b.as_markup())
             return
 
-    if not anime:
-        await msg.answer("❌ Anime topilmadi")
-        return
-
-    await state.update_data(anime_id=anime["id"])
-
-    if (anime.get("status") or "").upper() == "MOVIE":
-        from database.db import get_episode
-        existing = await get_episode(anime["id"], 1)
-        if existing:
-            await msg.answer("❗ Bu film uchun video allaqachon yuklangan!\nBoshqa video yuklashdan avval eskisini o'chiring.", reply_markup=admin_kb())
-            await state.clear()
-            return
-        await state.update_data(ep_number=1)
-        await state.set_state(UploadEpState.upload_video)
-        await msg.answer("🎬 Film uchun video yuboring:", reply_markup=cancel_kb())
-        return
-
-    await state.set_state(UploadEpState.ep_number)
-    await msg.answer("Epizod raqamini yuboring: (masalan 1)")
+    await msg.answer("❌ Topilmadi. Boshqa so'z kiriting yoki ro'yxatdan tanlang:")
 
 
-@router.callback_query(F.data.regexp(r"^sel_anime_ep:\d+$"))
-async def sel_anime_ep(cb: CallbackQuery, state: FSMContext):
+@router.callback_query(F.data.regexp(r"^ep_sel_anime:\d+$"))
+async def ep_sel_anime_cb(cb: CallbackQuery, state: FSMContext):
     if not await is_admin(cb.from_user.id):
+        await cb.answer("❌ Ruxsat yo'q", show_alert=True)
         return
 
     anime_id = int(cb.data.split(":")[1])
     anime = await get_anime_by_id(anime_id)
+    if not anime:
+        await cb.answer("❌ Anime topilmadi", show_alert=True)
+        return
+        
     await cb.answer()
+    await show_anime_episodes_for_upload(cb.message, anime, state, edit=True)
 
+
+@router.callback_query(F.data.regexp(r"^up_movie:\d+$"))
+async def up_movie_cb(cb: CallbackQuery, state: FSMContext):
+    anime_id = int(cb.data.split(":")[1])
+    existing = await get_episode(anime_id, 1)
+    if existing:
+        await cb.answer("❗ Bu film uchun video allaqachon yuklangan!\nEskisini o'chirmaguncha yangisini yuklay olmaysiz.", show_alert=True)
+        return
+        
+    await state.update_data(anime_id=anime_id, ep_number=1)
+    await state.set_state(UploadEpState.upload_video)
+    await cb.answer()
+    await cb.message.answer(
+        "🎬 Film uchun video yuboring:\n(Ushbu amalni to'xtatish uchun bot pastidagi '❌ Bekor qilish' tugmasini bosing)", 
+        reply_markup=cancel_kb()
+    )
+
+
+@router.callback_query(F.data.regexp(r"^up_ep:\d+$"))
+async def up_ep_cb(cb: CallbackQuery, state: FSMContext):
+    anime_id = int(cb.data.split(":")[1])
     await state.update_data(anime_id=anime_id)
-    if (anime or {}).get("status", "").upper() == "MOVIE":
-        from database.db import get_episode
-        existing = await get_episode(anime_id, 1)
-        if existing:
-            await cb.message.answer("❗ Bu film uchun video allaqachon yuklangan!\nEskisini o'chirmaguncha yangisini yuklolmaysiz.", reply_markup=admin_kb())
-            await state.clear()
-            return
-        await state.update_data(ep_number=1)
-        await state.set_state(UploadEpState.upload_video)
-        await cb.message.answer("🎬 Film uchun video yuboring:", reply_markup=cancel_kb())
-    else:
-        await state.set_state(UploadEpState.ep_number)
-        await cb.message.answer("Epizod raqamini yuboring:")
+    await state.set_state(UploadEpState.ep_number)
+    await cb.answer()
+    await cb.message.answer(
+        "📝 Qaysi qismini yuklamoqchisiz? Raqamini yuboring (masalan: 12):\n(Amalni to'xtatish uchun '❌ Bekor qilish' ni bosing)", 
+        reply_markup=cancel_kb()
+    )
 
 
 @router.message(UploadEpState.ep_number, F.text)
@@ -241,14 +317,13 @@ async def upload_ep_number(msg: Message, state: FSMContext):
         return
 
     if not msg.text.isdigit():
-        await msg.answer("❗ Raqam kiriting")
+        await msg.answer("❗ Qism raqami faqat butun son bo'lishi kerak. Iltimos raqam kiriting:")
         return
 
     ep_num = int(msg.text)
     data = await state.get_data()
     anime_id = data.get("anime_id")
 
-    from database.db import get_episode
     existing = await get_episode(anime_id, ep_num)
     if existing:
         await msg.answer(f"❗ Bu animeda {ep_num}-qism allaqachon mavjud!\nBoshqa raqam kiriting yoki avval eski qismni o'chiring.", reply_markup=cancel_kb())
@@ -256,7 +331,8 @@ async def upload_ep_number(msg: Message, state: FSMContext):
 
     await state.update_data(ep_number=ep_num)
     await state.set_state(UploadEpState.upload_video)
-    await msg.answer("📤 Video yuboring:", reply_markup=cancel_kb())
+    await msg.answer(f"📤 {ep_num}-qism uchun video/fayl yuboring:", reply_markup=cancel_kb())
+nswer("📤 Video yuboring:", reply_markup=cancel_kb())
 
 
 @router.message(UploadEpState.upload_video, F.video | F.document)
