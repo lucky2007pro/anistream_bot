@@ -332,7 +332,6 @@ async def upload_ep_number(msg: Message, state: FSMContext):
     await state.update_data(ep_number=ep_num)
     await state.set_state(UploadEpState.upload_video)
     await msg.answer(f"📤 {ep_num}-qism uchun video/fayl yuboring:", reply_markup=cancel_kb())
-nswer("📤 Video yuboring:", reply_markup=cancel_kb())
 
 
 @router.message(UploadEpState.upload_video, F.video | F.document)
